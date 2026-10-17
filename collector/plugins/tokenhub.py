@@ -1,7 +1,8 @@
 """Reuse the existing browser-free HTTP/WAF transport."""
 from datetime import datetime, timedelta, timezone
-from decimal import Decimal, ROUND_HALF_UP
+from decimal import Decimal, DecimalException, ROUND_HALF_UP
 import json
+import time
 from pathlib import Path
 
 from common import CollectionError, fingerprint, read_json
@@ -10,14 +11,32 @@ LABEL = "TokenHub"
 
 
 def collect(config, secrets):
-    from tokenhub_runtime.http_protocol import HttpProtocolClient
+    # These queries are read-only. Retry a transient protocol/response failure
+    # once, but never retry rejected credentials or unavailable OS isolation.
+    for attempt in range(2):
+        try:
+            return _collect(config, secrets)
+        except CollectionError as error:
+            if error.code != 'tokenhub_protocol' or attempt:
+                raise
+        except (OSError, ValueError, KeyError, TypeError, DecimalException):
+            if attempt:
+                raise CollectionError('tokenhub_response') from None
+        time.sleep(1)
+
+
+def _collect(config, secrets):
+    from tokenhub_runtime.http_protocol import HttpProtocolClient, ProtocolError
     auth = read_json(Path(config["auth_file"]).expanduser())
     token = auth.get("satoken")
     if not isinstance(token, str) or not token or any(c in token for c in "\r\n"):
         raise CollectionError("credentials_missing")
     day = datetime.now(timezone(timedelta(hours=8))).date().isoformat()
-    with HttpProtocolClient(config.get("timeout", 30), config.get("use_env_proxy", False), config.get("node_bin")) as client:
-        status, body = client.fetch(auth, day)
+    try:
+        with HttpProtocolClient(config.get("timeout", 30), config.get("use_env_proxy", False), config.get("node_bin")) as client:
+            status, body = client.fetch(auth, day)
+    except ProtocolError as error:
+        raise CollectionError("sandbox_unavailable" if str(error) == "sandbox_unavailable" else "tokenhub_protocol") from None
     if status != 200:
         raise CollectionError("auth" if status in (401, 403) else "http_" + str(status))
     if len(body) > 2_000_000:

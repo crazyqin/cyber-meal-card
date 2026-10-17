@@ -2,6 +2,7 @@
   "schema_version": 2,
   "collector_id": "auto",
   "interval_seconds": 300,
+  "cycle_timeout_seconds": 180,
   "state_dir": "state",
   "secrets_file": "secrets.local.json",
   "cos": {

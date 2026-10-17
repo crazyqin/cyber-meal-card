@@ -26,5 +26,8 @@ jobs:
           actionlint_bin="$(./tools/install-actionlint.sh "$RUNNER_TEMP/actionlint")"
           echo "ACTIONLINT_BIN=${actionlint_bin}" >> "$GITHUB_ENV"
 
+      - name: Install host parser dependency
+        run: sudo apt-get update && sudo apt-get install --yes libcjson-dev pkg-config
+
       - name: Validate repository and run host tests
         run: ./tools/validate.sh --static

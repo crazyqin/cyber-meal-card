@@ -94,43 +94,58 @@ run_static_checks() {
     else
         echo "LVGL formatter regression: NOT RUN (run an ESP-IDF build to fetch managed dependencies)"
     fi
+    local -a cjson_flags cjson_sources
     if [[ -n "${IDF_PATH:-}" && -f "${IDF_PATH}/components/json/cJSON/cJSON.c" ]]; then
+        cjson_flags=(-I"${IDF_PATH}/components/json/cJSON")
+        cjson_sources=("${IDF_PATH}/components/json/cJSON/cJSON.c")
+    elif command -v pkg-config >/dev/null 2>&1 && pkg-config --exists libcjson; then
+        read -r -a cjson_flags <<< "$(pkg-config --cflags libcjson)"
+        read -r -a cjson_sources <<< "$(pkg-config --libs libcjson)"
+    else
+        echo "ERROR: core parser tests require ESP-IDF cJSON or libcjson-dev + pkg-config." >&2
+        return 1
+    fi
+    (
         "${CC:-cc}" -std=c11 -Wall -Wextra -Werror -DQUOTA_PARSE_TEST -Imain \
-            -I"${IDF_PATH}/components/json/cJSON" tests/test_quota.c \
+            "${cjson_flags[@]}" tests/test_quota.c \
             main/quota_model.c main/quota_parse.c main/quota_config.c \
-            "${IDF_PATH}/components/json/cJSON/cJSON.c" \
+            "${cjson_sources[@]}" -lm \
             -o "${test_dir}/test_quota_parse"
         "${test_dir}/test_quota_parse"
         "${CC:-cc}" -std=c11 -Wall -Wextra -Werror -Imain \
-            -I"${IDF_PATH}/components/json/cJSON" tests/test_quota_cos.c \
+            "${cjson_flags[@]}" tests/test_quota_cos.c \
             main/quota_model.c main/quota_parse.c main/quota_config.c main/quota_cos.c \
-            "${IDF_PATH}/components/json/cJSON/cJSON.c" -lm \
+            "${cjson_sources[@]}" -lm \
             -o "${test_dir}/test_quota_cos"
         "${test_dir}/test_quota_cos"
         "${CC:-cc}" -std=c11 -Wall -Wextra -Werror -Imain \
-            -I"${IDF_PATH}/components/json/cJSON" tests/test_tokenhub.c \
+            "${cjson_flags[@]}" tests/test_tokenhub.c \
             main/quota_model.c main/quota_parse.c main/quota_config.c main/quota_cos.c \
-            "${IDF_PATH}/components/json/cJSON/cJSON.c" -lm \
+            "${cjson_sources[@]}" -lm \
             -o "${test_dir}/test_tokenhub"
         "${test_dir}/test_tokenhub"
         "${CC:-cc}" -std=c11 -Wall -Wextra -Werror -Imain \
-            -I"${IDF_PATH}/components/json/cJSON" tests/test_quota_discovery.c \
+            "${cjson_flags[@]}" tests/test_quota_discovery.c \
             main/quota_model.c main/quota_parse.c main/quota_config.c main/quota_discovery.c \
-            "${IDF_PATH}/components/json/cJSON/cJSON.c" -lm \
+            "${cjson_sources[@]}" -lm \
             -o "${test_dir}/test_quota_discovery"
         "${test_dir}/test_quota_discovery"
         "${CC:-cc}" -std=c11 -Wall -Wextra -Werror -Imain \
-            -I"${IDF_PATH}/components/json/cJSON" tests/test_collection.c \
+            "${cjson_flags[@]}" tests/test_collection.c \
             main/quota_model.c main/quota_parse.c main/quota_config.c main/quota_discovery.c main/quota_collection.c \
-            "${IDF_PATH}/components/json/cJSON/cJSON.c" -lm \
+            "${cjson_sources[@]}" -lm \
             -o "${test_dir}/test_collection"
         "${test_dir}/test_collection"
-    else
-        echo "Quota provider parsing: NOT RUN (activate ESP-IDF for the complete gate)"
-    fi
+        "${CC:-cc}" -std=c11 -Wall -Wextra -Werror -Imain "${cjson_flags[@]}" \
+            tests/quota_contract_probe.c main/quota_model.c main/quota_parse.c main/quota_config.c \
+            main/quota_discovery.c main/quota_collection.c "${cjson_sources[@]}" -lm -o "${test_dir}/quota_contract_probe"
+        PYTHONDONTWRITEBYTECODE=1 python3 tests/test_collector_contract.py "${test_dir}/quota_contract_probe"
+    )
     PYTHONDONTWRITEBYTECODE=1 python3 tests/test_quota_tools.py
     PYTHONDONTWRITEBYTECODE=1 python3 tests/test_collectors.py
+    PYTHONDONTWRITEBYTECODE=1 python3 tests/test_collector_supervisor.py
     PYTHONDONTWRITEBYTECODE=1 python3 tests/test_linux_deployment.py
+    PYTHONDONTWRITEBYTECODE=1 python3 tests/test_tokenhub_sandbox.py
     bash -n collector/linux/install.sh
     bash -n collector/linux/collector.sh
     bash -n collector/linux/runtimes.sh

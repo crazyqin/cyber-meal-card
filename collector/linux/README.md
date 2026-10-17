@@ -109,10 +109,24 @@ logs are in `state/collector.log`. A source error does not refresh the old sourc
 one-shot check. `runtime-check` verifies local dependencies, not account authentication
 or live API availability. Restart after editing module configuration.
 
-`start` survives SSH logout but is not an automatic reboot service. If desired, use
-a systemd unit whose `WorkingDirectory` is this deployment directory and whose
-`ExecStart` is `/absolute/path/.venv/bin/python /absolute/path/deploy.py run`.
-Configure the service under the intended user's account and keep file access private.
+`start` uses a supervisor that retries failed cycles, enforces the default 180-second
+cycle deadline and rotates logs at 1 MiB with three backups. Set
+`cycle_timeout_seconds` (30..3600) in local configuration if necessary. The next
+cycle reloads configuration. Credential-file errors preserve the last good data.
+
+For automatic startup, run `bash collector.sh service-install`. This installs and
+starts a systemd user service for this deployment, with failure restart and process
+group cleanup. Normal `start`, `stop`, `restart` and `status` then use that service.
+To run before login and after logout, an administrator may need to enable lingering
+with `sudo loginctl enable-linger "$USER"`. Without systemd, detached `start`
+still works but does not survive a machine reboot.
+
+TokenHub requires OS isolation: install `bubblewrap` (Ubuntu/Debian:
+`sudo apt-get install bubblewrap`) and ensure unprivileged user namespaces are
+available under the host's security policy. No Docker is used. Downloaded scripts
+cannot mount account/state directories or use the host network. There is no
+unrestricted fallback: unavailable isolation produces a collection error while
+other platforms can continue. Windows uses AppContainer instead.
 
 The first install downloads runtimes from GitHub/nodejs.org and dependencies from
 PyPI/npm; it is not an offline runtime image. curl honors download proxy environment

@@ -1,3 +1,6 @@
+// Only sandbox.py launches this entry point; the marker catches accidental direct
+// invocation. OS isolation, not this marker or hidden globals, is the boundary.
+if (!process.permission || process.env.CYBER_WAF_SANDBOX !== '1') process.exit(78);
 // Local JS interpreter. This process cannot fetch resources: all HTTP is Python-owned.
 const fs=require('node:fs');
 const path=require('node:path');

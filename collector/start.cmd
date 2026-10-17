@@ -1,8 +1,8 @@
 @echo off
 cd /d "%~dp0"
 if exist .venv\Scripts\python.exe (
-  .venv\Scripts\python.exe -X utf8 collect.py run
+  .venv\Scripts\python.exe -X utf8 supervise.py
 ) else (
-  python -X utf8 collect.py run
+  python -X utf8 supervise.py
 )
 pause

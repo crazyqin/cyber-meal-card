@@ -17,7 +17,7 @@ PREFIX = 'ai-collector-linux'
 def source_files():
     """Explicit source scope, never the running collector's complete directory."""
     files = {}
-    for name in ('collect.py', 'common.py', 'requirements.txt', 'config.example.json'):
+    for name in ('collect.py', 'common.py', 'summary.py', 'supervise.py', 'requirements.txt', 'config.example.json'):
         files['app/' + name] = COLLECTOR / name
     for folder in ('plugins', 'tokenhub_runtime'):
         for path in (COLLECTOR/folder).rglob('*'):

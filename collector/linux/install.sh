@@ -22,6 +22,10 @@ case "$(uname -m)" in
     *) echo "Supported architectures: x86_64 and aarch64." >&2; exit 1 ;;
 esac
 source "$root/runtimes.sh"
+if ! command -v bwrap >/dev/null 2>&1; then
+    echo 'TokenHub requires bubblewrap and unprivileged user namespaces. Ubuntu/Debian: sudo apt-get install bubblewrap' >&2
+    echo 'Other collectors remain usable; TokenHub will fail closed until its sandbox is available.' >&2
+fi
 mkdir -p .runtime .downloads state accounts settings
 download() {
     local url="$1" digest="$2" destination="$3"

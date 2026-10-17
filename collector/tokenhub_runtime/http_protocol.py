@@ -58,12 +58,11 @@ class JavaScriptWorker:
     def __init__(self,timeout,node_path=None):
         self.timeout=timeout
         self.messages=queue.Queue()
-        self.process=subprocess.Popen(
-            [node_path or node_executable(),str(ROOT/"waf_runtime/worker.cjs")],
-            stdin=subprocess.PIPE,stdout=subprocess.PIPE,stderr=subprocess.DEVNULL,
-            text=True,encoding="utf-8",bufsize=1,
-            creationflags=subprocess.CREATE_NO_WINDOW if os.name=="nt" else 0,
-        )
+        from .sandbox import SandboxUnavailable, worker_process
+        try:
+            self.process=worker_process(node_path or node_executable(), ROOT/"waf_runtime/worker.cjs")
+        except SandboxUnavailable:
+            raise ProtocolError("sandbox_unavailable") from None
         def read():
             try:
                 for line in self.process.stdout:
@@ -82,6 +81,8 @@ class JavaScriptWorker:
     def receive(self,event):
         try:message=self.messages.get(timeout=self.timeout)
         except queue.Empty as error:raise ProtocolError("等待本地 JavaScript 校验超时。") from error
+        if message is None:
+            raise ProtocolError("sandbox_unavailable")
         if not isinstance(message,dict) or message.get("event")!=event:
             raise ProtocolError("本地 JavaScript 协议处理失败。")
         return message
@@ -94,7 +95,10 @@ class JavaScriptWorker:
                 try:self.process.wait(timeout=3)
                 except subprocess.TimeoutExpired:self.process.kill();self.process.wait()
         for pipe in (self.process.stdin,self.process.stdout):
-            if pipe:pipe.close()
+            if pipe:
+                try:pipe.close()
+                except OSError:pass  # A closed pipe must not replace the original error.
+        if hasattr(self.process, 'release'):self.process.release()
 
     def __enter__(self):return self
     def __exit__(self,*args):self.close()

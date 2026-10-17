@@ -91,10 +91,19 @@ bash collector.sh runtime-check
 失败不会刷新旧数据的源采集时间。`check` 与后台进程共用状态锁，手动单次检查前先停止后台进程。
 `runtime-check` 只检查本地依赖，不代表账号认证和真实接口可用。编辑模块配置后需要重启采集器。
 
-`start` 能在退出 SSH 后运行，尚未配置机器重启后的自动启动。如有需要，可配置 systemd：
-`WorkingDirectory` 为本部署目录，`ExecStart` 为
-`/absolute/path/.venv/bin/python /absolute/path/deploy.py run`。服务使用预期的用户身份，保持
-配置文件访问权限私有。
+`start` 使用监督进程，失败后重试，每轮默认最多 180 秒，日志每 1 MiB 轮转，保留三份备份。
+如需调整，在本地配置设置 `cycle_timeout_seconds`（30..3600）。下一轮重新加载配置，
+凭据文件异常时保留最后成功的数据。
+
+需要自动启动时执行 `bash collector.sh service-install`，为本部署安装并启动 systemd 用户服务，
+支持失败重启和进程组清理。此后普通 `start`、`stop`、`restart`、`status` 会管理该服务。
+若需要登录前启动、退出登录后继续运行，管理员可能需要执行
+`sudo loginctl enable-linger "$USER"`。没有 systemd 时仍可用后台 `start`，但机器重启后不会自动恢复。
+
+TokenHub 需要操作系统隔离：安装 `bubblewrap`（Ubuntu/Debian：
+`sudo apt-get install bubblewrap`），并确保主机安全策略允许非特权用户命名空间。
+不使用 Docker。下载的脚本不能挂载账号／状态目录，也不能使用宿主网络。
+隔离不可用时不会退回不受限运行，该平台会报采集错误，其他平台仍可继续；Windows 使用 AppContainer。
 
 首次安装要从 GitHub、nodejs.org 下载运行时，从 PyPI/npm 下载依赖，并非离线运行时镜像。
 curl 支持下载代理环境变量。实际采集仍需要访问所选平台及 COS，必要时填写平台／COS 的代理字段。

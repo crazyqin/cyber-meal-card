@@ -15,7 +15,7 @@ sys.path.insert(0, str(ROOT / "collector"))
 import collect
 from common import CollectionError, atomic_json, scrub, window
 from plugins.chatgpt import normalize
-from plugins import teleagent
+from plugins import teleagent, tokenhub
 
 
 class CollectorTests(unittest.TestCase):
@@ -50,6 +50,40 @@ class CollectorTests(unittest.TestCase):
             changed, _ = self.report(previous=first)
         self.assertIsNone(changed["accounts"][0]["collected_at"])
         self.assertNotIn("windows", changed["accounts"][0])
+
+    def test_bad_summary_becomes_error_without_rejecting_other_accounts(self):
+        self.config['accounts'].append({'id':'other','provider':'custom','name':'other'})
+        self.adapter.collect.side_effect = [
+            {'identity':'bad','windows':[{'window_minutes':300,'used_percent':25,'remaining_percent':999}]},
+            {'identity':'good','windows':[window(25,300,1792195200)]}]
+        report, _ = self.report()
+        self.assertEqual([r['status'] for r in report['accounts']], ['error','ok'])
+        self.assertEqual(report['accounts'][0]['error_code'], 'invalid_summary')
+        self.assertNotIn('windows',report['accounts'][0])
+
+    def test_same_remote_account_emitted_once(self):
+        self.config['accounts'].append({'id':'alias','provider':'custom','name':'alias'})
+        report, detail = self.report()
+        self.assertEqual(len(report['accounts']),1)
+        self.assertEqual(len(detail['accounts']),1)
+
+    def test_tokenhub_retries_transient_response_once_but_not_auth(self):
+        with patch.object(tokenhub,'_collect',side_effect=[ValueError('synthetic'),{'identity':'good'}]) as adapter, \
+             patch.object(tokenhub.time,'sleep'):
+            self.assertEqual(tokenhub.collect({},{}),{'identity':'good'})
+        self.assertEqual(adapter.call_count,2)
+        for code in ('auth','sandbox_unavailable','credentials_missing'):
+            with patch.object(tokenhub,'_collect',side_effect=CollectionError(code)) as adapter, \
+                 self.assertRaises(CollectionError):
+                tokenhub.collect({},{})
+            self.assertEqual(adapter.call_count,1)
+
+    def test_invalid_summary_preserves_valid_previous_data(self):
+        previous, _ = self.report()
+        self.adapter.collect.return_value = {'points':{'balance':'x','spent_today':'0','added_today':'0'}}
+        report, _ = self.report(previous=previous)
+        self.assertEqual(report['accounts'][0]['status'],'error')
+        self.assertEqual(report['accounts'][0]['windows'],previous['accounts'][0]['windows'])
 
     def test_unavailable_reset_count_and_detail_limit_semantics(self):
         empty = normalize({"rateLimitResetCredits": None})
@@ -146,6 +180,39 @@ class CollectorTests(unittest.TestCase):
         for call in calls:
             self.assertNotIn("ACL",call.kwargs)
             self.assertEqual(call.kwargs["CacheControl"],"no-store")
+
+    def test_cos_environment_session_token_and_file_fallback(self):
+        config={'cos':{'bucket':'example-1250000000','region':'ap-shanghai','prefix':'usage',
+                'secret_id_ref':'COS_ID','secret_key_ref':'COS_KEY','token_ref':'COS_SESSION'}}
+        sdk=MagicMock(); http=MagicMock()
+        saved={'COS_ID':'example-id','COS_KEY':'example-key','COS_SESSION':'example-file-token'}
+        report={'collector_id':'pc-a','accounts':[]}
+        with patch.dict(sys.modules,{'qcloud_cos':sdk,'requests':http}),patch.dict(os.environ,{'COS_SESSION':'example-env-token'}):
+            collect.publish(config,saved,report,report)
+        self.assertEqual(sdk.CosConfig.call_args.kwargs['Token'],'example-env-token')
+        with patch.dict(sys.modules,{'qcloud_cos':sdk,'requests':http}),patch.dict(os.environ,{},clear=True):
+            collect.publish(config,saved,report,report)
+        self.assertEqual(sdk.CosConfig.call_args.kwargs['Token'],'example-file-token')
+
+    def test_teleagent_passes_explicit_proxy_to_both_requests(self):
+        responses=[{'code':0,'data':{'pointsBalance':1}},
+                   {'code':0,'data':{'todayPointsUsed':0,'todayPointsAdded':0}}]
+        with patch.object(teleagent,'read_json',return_value={'operation_token':'example-token'}), \
+             patch.object(teleagent,'get_json',side_effect=responses) as request:
+            teleagent.collect({'id':'main','auth_file':'unused','proxy':'http://127.0.0.1:8888'}, {})
+        self.assertEqual([c.kwargs['proxy'] for c in request.call_args_list],['http://127.0.0.1:8888']*2)
+
+    def test_broken_secrets_retries_and_keeps_previous_snapshot(self):
+        with tempfile.TemporaryDirectory() as folder:
+            root=Path(folder)
+            config={'_state':root,'_secrets':root/'secrets.json'}
+            config['_secrets'].write_text('{')
+            atomic_json(root/'latest.json',{'marker':'last-good'})
+            with patch('collect.time.sleep',side_effect=KeyboardInterrupt),self.assertRaises(KeyboardInterrupt):
+                collect.run(config)
+            self.assertEqual(json.loads((root/'latest.json').read_text()),{'marker':'last-good'})
+            self.assertEqual(json.loads((root/'status.json').read_text())['error_code'],'secrets_unreadable')
+            self.assertEqual(collect.run(config,once=True),1)
 
     def test_failed_publication_keeps_local_collection(self):
         with tempfile.TemporaryDirectory() as folder:

@@ -17,6 +17,7 @@ import time
 import uuid
 
 from common import CollectionError, ID, ROOT, atomic_json, fingerprint, read_json, scrub, secret, utc_now
+from summary import validate as validate_summary
 
 
 def available_plugins():
@@ -30,6 +31,9 @@ def load_config(path):
         raise ValueError("Unsupported configuration version")
     if not isinstance(config.get("interval_seconds"), int) or not 30 <= config["interval_seconds"] <= 86400:
         raise ValueError("interval_seconds must be 30..86400")
+    budget = config.get("cycle_timeout_seconds", 180)
+    if isinstance(budget, bool) or not isinstance(budget, int) or not 30 <= budget <= 3600:
+        raise ValueError("cycle_timeout_seconds must be 30..3600")
     if config.get("collector_id", "auto") != "auto" and not valid_id(config["collector_id"]):
         raise ValueError("Invalid collector_id")
     accounts = config.get("accounts")
@@ -133,6 +137,7 @@ def collect_report(config, secrets, previous=None, previous_details=None):
         checked = utc_now()
         record = {"local_id": row["id"], "provider": row["provider"], "name": row.get("name", row["id"]),
                   "account_id": row.get("account_id", row["id"]), "checked_at": checked}
+        base_record = record.copy()
         try:
             module = importlib.import_module("plugins." + row["provider"])
             result = dict(module.collect(row, secrets))
@@ -150,8 +155,7 @@ def collect_report(config, secrets, previous=None, previous_details=None):
                 if key in result:
                     record[key] = result[key][:3] if key == "windows" else result[key][:2] if key == "balances" else result[key]
             # Validate plugin summaries before replacing the last good snapshot.
-            if len(json.dumps(record, allow_nan=False).encode()) > 4096:
-                raise CollectionError("summary_too_large")
+            validate_summary(record)
             details.append(detail_row)
         except Exception as error:
             code = error.code if isinstance(error, CollectionError) else "adapter_failed"
@@ -160,15 +164,31 @@ def collect_report(config, secrets, previous=None, previous_details=None):
             # No str(error): upstream/SDK errors may contain auth or URLs.
             cached = old.get(row["id"])
             binding = credential_binding(row, secrets)
+            try:
+                if cached:
+                    validate_summary(cached)
+            except (CollectionError, TypeError, ValueError):
+                cached = None
             if cached and cached.get("_binding") == binding:
                 record = {**copy.deepcopy(cached), "status": "error", "checked_at": checked, "error_code": code}
                 prior_detail = old_details.get(row["id"], {})
             else:
-                record.update(status="error", collected_at=None, error_code=code)
+                record = {**base_record, "checked_at": checked, "status": "error", "collected_at": None, "error_code": code}
                 prior_detail = {}
             details.append({**copy.deepcopy(prior_detail), **{k: v for k, v in record.items() if not k.startswith("_")}})
         record["_binding"] = credential_binding(row, secrets)
         records.append(record)
+    # Different local aliases may resolve to the same remote identity. Prefer a
+    # successful row and emit that identity once; cross-computer merging is unchanged.
+    unique = {}
+    for record, detail_row in zip(records, details):
+        key = (record["provider"], record["account_id"])
+        old_pair = unique.get(key)
+        if old_pair is None or (record["status"] == "ok", record.get("collected_at") or "") > \
+                (old_pair[0]["status"] == "ok", old_pair[0].get("collected_at") or ""):
+            unique[key] = (record, detail_row)
+    records = [pair[0] for pair in unique.values()]
+    details = [pair[1] for pair in unique.values()]
     report = {"schema_version": 2, "collector_id": collector_id(config), "collected_at": utc_now(),
               "accounts": records}
     detail = {**report, "accounts": details}
@@ -215,7 +235,8 @@ def publish(config, secrets, report, details):
     with requests.Session() as session:
         session.trust_env = False
         client = CosS3Client(CosConfig(Region=region, SecretId=secret(cos, secrets, "secret_id"),
-            SecretKey=secret(cos, secrets, "secret_key"), Token=secrets.get(cos.get("token_ref")) or None,
+            SecretKey=secret(cos, secrets, "secret_key"), Token=secret(cos, secrets, "token") if cos.get("token_ref") and
+                (os.environ.get(cos["token_ref"]) or secrets.get(cos["token_ref"])) else None,
             Scheme="https", Timeout=30, Proxies={"http": cos["proxy"], "https": cos["proxy"]} if cos.get("proxy") else {}),
             retry=2, session=session)
         # Independent objects per machine. No shared index and no read/modify/write race.
@@ -229,7 +250,18 @@ def run(config, once=False, no_upload=False):
     with run_lock(config["_state"]):
         while True:
             started = time.monotonic()
-            secrets = read_json(config["_secrets"])
+            try:
+                secrets = read_json(config["_secrets"])
+            except (OSError, ValueError):
+                # Editors can briefly replace a file with partial JSON. Never
+                # overwrite the last good snapshots or publish a fabricated zero.
+                atomic_json(config["_state"] / "status.json", {"checked_at": utc_now(),
+                    "upload": "skipped", "error_code": "secrets_unreadable", "running": True})
+                print(f"{utc_now()} error=secrets_unreadable retry=30", flush=True)
+                if once:
+                    return 1
+                time.sleep(30)
+                continue
             try:
                 previous = read_json(config["_state"] / "latest.local.json")
             except (OSError, ValueError):
@@ -244,13 +276,17 @@ def run(config, once=False, no_upload=False):
             atomic_json(config["_state"] / "details.json", detail)
             failures = sum(r["status"] != "ok" for r in report["accounts"])
             state = "skipped" if no_upload else "ok"
+            upload_code = None
             if not no_upload:
                 try:
                     publish(config, secrets, report, detail)
-                except Exception:
+                except Exception as error:
                     state = "error"
+                    upload_code = error.code if isinstance(error, CollectionError) else "upload_failed"
             atomic_json(config["_state"] / "status.json", {"checked_at": utc_now(), "accounts": len(report["accounts"]),
-                "collection_errors": failures, "upload": state, "collector_id": report["collector_id"]})
+                "collection_errors": failures, "upload": state, "upload_error_code": upload_code,
+                "sources": [{"provider": r["provider"], "status": r["status"], "error_code": r.get("error_code")}
+                            for r in report["accounts"]], "collector_id": report["collector_id"], "running": True})
             print(f"{utc_now()} accounts={len(report['accounts'])} errors={failures} upload={state}", flush=True)
             for row in report["accounts"]:
                 if row["status"] != "ok":

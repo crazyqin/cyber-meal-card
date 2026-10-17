@@ -2,9 +2,11 @@
 from __future__ import annotations
 from contextlib import contextmanager
 import json
+import hashlib
 import os
 from pathlib import Path
 import signal
+import shutil
 import subprocess
 import sys
 import time
@@ -68,8 +70,9 @@ def process_identity(pid):
         stat = Path(f'/proc/{pid}/stat').read_text()
         fields = stat.rsplit(')', 1)[1].split()
         args = Path(f'/proc/{pid}/cmdline').read_bytes().split(b'\0')
-        expected = {str(APP / 'collect.py').encode(), str(CONFIG).encode(), b'run'}
-        if fields[0] == 'Z' or not expected.issubset(set(args)):
+        expected = {str(APP / 'supervise.py').encode(), str(CONFIG).encode()}
+        legacy = {str(APP / 'collect.py').encode(), str(CONFIG).encode(), b'run'}
+        if fields[0] == 'Z' or not (expected.issubset(set(args)) or legacy.issubset(set(args))):
             return None
         return fields[19]
     except (OSError, IndexError, ValueError):
@@ -100,12 +103,14 @@ def control_lock():
 def start():
     config()
     from common import atomic_json
+    if (Path.home()/'.config/systemd/user'/service_name()).exists():
+        return subprocess.call(['systemctl','--user','start',service_name()])
     with control_lock():
         if running():
             print('采集器已经运行。'); return 0
-        with (STATE / 'collector.log').open('ab', buffering=0) as log:
-            child = subprocess.Popen(command(), cwd=ROOT, stdin=subprocess.DEVNULL,
-                                     stdout=log, stderr=subprocess.STDOUT, start_new_session=True)
+        child = subprocess.Popen([sys.executable,str(APP/'supervise.py'),'--config',str(CONFIG)],
+                                 cwd=ROOT,stdin=subprocess.DEVNULL,stdout=subprocess.DEVNULL,
+                                 stderr=subprocess.DEVNULL,start_new_session=True)
         time.sleep(1)
         identity = process_identity(child.pid)
         if child.poll() is not None or identity is None:
@@ -116,6 +121,8 @@ def start():
 
 
 def stop():
+    if service_active():
+        return subprocess.call(['systemctl','--user','stop',service_name()])
     with control_lock():
         pid = running()
         if pid is None:
@@ -130,6 +137,48 @@ def stop():
             time.sleep(0.1)
         print('进程尚未退出，请查看日志。', file=sys.stderr)
         return 1
+
+
+def service_name():
+    return 'cyber-meal-card-' + hashlib.sha256(str(ROOT).encode()).hexdigest()[:12] + '.service'
+
+
+def service_active():
+    return bool(shutil.which('systemctl')) and subprocess.run(
+        ['systemctl','--user','is-active','--quiet',service_name()],
+        stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL).returncode == 0
+
+
+def service_unit():
+    def quote(value):
+        value = str(value)
+        if any(c in value for c in '\r\n\0'):
+            raise ValueError('Invalid service path')
+        return '"' + value.replace('\\','\\\\').replace('"','\\"').replace('%','%%') + '"'
+    return ('[Unit]\nDescription=Cyber Meal Card collector\nAfter=network-online.target\n\n'
+            '[Service]\nType=simple\nUMask=0077\n'
+            'WorkingDirectory=' + quote(ROOT) + '\nExecStart=' + quote(sys.executable) + ' ' +
+            quote(APP/'supervise.py') + ' --config ' + quote(CONFIG) + '\n'
+            'Restart=on-failure\nRestartSec=30\nTimeoutStopSec=15\nKillMode=control-group\n\n'
+            '[Install]\nWantedBy=default.target\n')
+
+
+def service_install():
+    config()
+    result = stop()
+    if result:
+        return result
+    folder = Path.home()/'.config/systemd/user'
+    folder.mkdir(parents=True,exist_ok=True)
+    path = folder/service_name()
+    content = service_unit()
+    if path.exists() and path.read_text() != content:
+        raise ValueError('Existing service differs; preserving it')
+    path.write_text(content)
+    subprocess.run(['systemctl','--user','daemon-reload'],check=True)
+    subprocess.run(['systemctl','--user','enable','--now',service_name()],check=True)
+    print('User service installed. Use systemctl --user status ' + service_name())
+    return 0
 
 
 def login(account='chatgpt-main'):
@@ -199,25 +248,30 @@ def main():
         if action == 'tokenhub-auth': tokenhub_auth(); return 0
         if action == 'teleagent-auth': teleagent_auth(); return 0
         if action == 'start': return start()
+        if action == 'service-install': return service_install()
         if action == 'stop': return stop()
         if action == 'restart':
             result=stop()
             return result if result else start()
         if action in ('run', 'check'):
-            args=command()
+            args=command() if action=='check' else [sys.executable,str(APP/'supervise.py'),'--config',str(CONFIG)]
             if action == 'check': args.append('--once')
             return subprocess.call(args,cwd=ROOT)
         if action == 'cli':
             return subprocess.call([sys.executable,str(APP/'collect.py'),'--config',str(CONFIG),*sys.argv[2:]],cwd=ROOT)
         if action == 'status':
-            print('运行中' if running() else '未通过 start 启动')
+            print('运行中' if running() or service_active() else '未通过 start 启动')
             path=STATE/'status.json'
             if path.exists(): print(path.read_text(encoding='utf-8'))
             else: print('尚无采集结果。')
             return 0
         if action == 'logs':
             path=STATE/'collector.log'
-            print('\n'.join(path.read_text(encoding='utf-8',errors='replace').splitlines()[-100:]) if path.exists() else '暂无日志。')
+            if path.exists():
+                with path.open('rb') as stream:
+                    stream.seek(max(0,path.stat().st_size-65536))
+                    print('\n'.join(stream.read().decode('utf-8',errors='replace').splitlines()[-100:]))
+            else: print('暂无日志。')
             return 0
         print('Commands: init/login/configure/tokenhub-auth/teleagent-auth/check/start/stop/restart/status/logs/run/cli')
         return 2

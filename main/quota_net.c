@@ -35,7 +35,7 @@
 #define REFRESH_BIT 1
 #define SETUP_BIT 2
 #define CONNECT_BIT 4
-#define FIRMWARE_TAG "20261017-teleagent-blue"
+#define FIRMWARE_TAG "20261017-collector-recovery"
 typedef struct { uint32_t version, generation; quota_snapshot_t snapshot; } quota_cache_t;
 static quota_config_t s_config;
 static quota_snapshot_t s_snapshot;
@@ -45,9 +45,11 @@ static QueueHandle_t s_config_queue;
 static TaskHandle_t s_worker;
 static httpd_handle_t s_server;
 static volatile bool s_wifi;
-static bool s_config_pending;
+static volatile bool s_config_pending;
 static volatile bool s_setup_touched;
 static esp_netif_t *s_ap_netif;
+static int64_t s_sync_deadline;
+static int s_fetch_cursor;
 static quota_status_t failure(int code);
 extern const unsigned char setup_html_start[] asm("_binary_setup_html_start");
 extern const unsigned char setup_html_end[] asm("_binary_setup_html_end");
@@ -113,8 +115,14 @@ static bool connect_station(const quota_config_t *cfg) {
     return s_wifi;
 }
 typedef struct { char *buffer; size_t length; bool overflow; } response_t;
+static bool sync_interrupted(void) {
+    return !s_wifi || s_config_pending ||
+        (s_sync_deadline && esp_timer_get_time() / 1000 >= s_sync_deadline) ||
+        (ulTaskNotifyValueClear(NULL, 0) & (SETUP_BIT | CONNECT_BIT));
+}
 static esp_err_t http_event(esp_http_client_event_t *event) {
     response_t *r = event->user_data;
+    if (sync_interrupted()) return ESP_FAIL;
     if (event->event_id != HTTP_EVENT_ON_DATA) return ESP_OK;
     if (event->data_len < 0 || r->length + (size_t)event->data_len >= RESPONSE_CAP) {
         r->overflow = true;
@@ -130,14 +138,20 @@ static esp_err_t http_event(esp_http_client_event_t *event) {
 static char *request_raw(const char *url, const char *authorization, const char *token, int *status, size_t *length) {
     *status = -1;
     *length = 0;
+    if (sync_interrupted()) return NULL;
     response_t response = {.buffer = calloc(1, RESPONSE_CAP)};
     if (!response.buffer) return NULL;
     esp_http_client_config_t cfg = {
-        .url = url, .timeout_ms = 15000, .crt_bundle_attach = esp_crt_bundle_attach,
+        .url = url, .timeout_ms = 5000, .crt_bundle_attach = esp_crt_bundle_attach,
         .event_handler = http_event, .user_data = &response,
         .disable_auto_redirect = true, .buffer_size = 1024, .buffer_size_tx = 1024,
         .user_agent = "AI-Passport-Subscriptions/1.0",
     };
+    if (s_sync_deadline) {
+        int64_t remaining = s_sync_deadline - esp_timer_get_time() / 1000;
+        if (remaining < 1) { free(response.buffer); return NULL; }
+        if (remaining < cfg.timeout_ms) cfg.timeout_ms = (int)remaining;
+    }
     /* A JWT can exceed the default 1 KiB header buffer; a header must fit as a
      * whole in esp_http_client's transmit buffer. */
     size_t header_size = strlen(url) + (authorization ? strlen(authorization) : 0) + (token ? strlen(token) : 0) + 512;
@@ -197,6 +211,7 @@ static void fetch_codex(void) {
     if (!next || !page || !collectors) {
         free(next); free(page); free(collectors); codex_unavailable(QUOTA_STORAGE); return;
     }
+    s_sync_deadline = esp_timer_get_time() / 1000 + 45000;
     xSemaphoreTake(s_mutex, portMAX_DELAY); *next = s_snapshot; xSemaphoreGive(s_mutex);
     next->discovery_limited = false;
     next->discovery_status = QUOTA_OK;
@@ -204,6 +219,7 @@ static void fetch_codex(void) {
     bool complete = false;
     char marker[512] = "", url[2304], auth[704];
     for (int requests = 0; requests < 128; requests++) {
+        if (sync_interrupted()) { next->discovery_status = QUOTA_NETWORK; break; }
         int status = -1; size_t length = 0;
         char *xml = NULL;
         if (quota_cos_sign_list(&s_config, marker, time(NULL), cos_hash, url, sizeof(url), auth, sizeof(auth)))
@@ -229,7 +245,11 @@ static void fetch_codex(void) {
     /* Retained rows that could not be visited must never appear freshly read. */
     for (int i = 0; i < next->codex_count; i++)
         next->providers[QUOTA_CODEX + i].status = next->discovery_status == QUOTA_OK ? QUOTA_NETWORK : next->discovery_status;
-    for (int i = 0; i < count; i++) {
+    int start = count ? s_fetch_cursor % count : 0;
+    int visited = 0;
+    for (; visited < count; visited++) {
+        int i = (start + visited) % count;
+        if (sync_interrupted()) { next->discovery_status = QUOTA_NETWORK; break; }
         int status = -1; cJSON *json = NULL;
         if (quota_cos_sign_object(&s_config, collectors[i], time(NULL), cos_hash, url, sizeof(url), auth, sizeof(auth)))
             json = request(url, auth, s_config.cos_token, &status);
@@ -246,10 +266,16 @@ static void fetch_codex(void) {
             if (result == QUOTA_LIMIT) next->discovery_limited = true;
             else if (next->discovery_status == QUOTA_OK) next->discovery_status = result;
         }
+        /* Publish complete machine reports promptly, keeping each report atomic. */
+        quota_codex_sort(next);
+        xSemaphoreTake(s_mutex, portMAX_DELAY); s_snapshot = *next; xSemaphoreGive(s_mutex);
     }
+    /* Resume with unvisited machines next cycle when the time budget expires. */
+    s_fetch_cursor = count ? (start + visited) % count : 0;
     quota_codex_sort(next);
     xSemaphoreTake(s_mutex, portMAX_DELAY); s_snapshot = *next; xSemaphoreGive(s_mutex);
     free(next); free(page); free(collectors);
+    s_sync_deadline = 0;
 }
 static esp_err_t setup_page(httpd_req_t *req) {
     httpd_resp_set_type(req, "text/html; charset=utf-8");

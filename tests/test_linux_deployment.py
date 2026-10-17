@@ -1,7 +1,7 @@
 """Deployment checks without a Linux VM, Docker, real logins or cloud mutation."""
 import importlib.util
 import json
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 import sys
 import tarfile
 import tempfile
@@ -29,6 +29,9 @@ class LinuxDeploymentTests(unittest.TestCase):
                 self.assertEqual(archive.getmember('ai-collector-linux/install.sh').mode,0o755)
                 self.assertNotIn('ai-collector-linux/settings/cos.local.json',names)
                 self.assertIn('ai-collector-linux/app/plugins/teleagent.py',names)
+                self.assertIn('ai-collector-linux/app/summary.py',names)
+                self.assertIn('ai-collector-linux/app/supervise.py',names)
+                self.assertIn('ai-collector-linux/app/tokenhub_runtime/sandbox.py',names)
                 for name in names:
                     self.assertNotIn('/node_modules/',name)
                     self.assertNotIn('/state/',name)
@@ -91,6 +94,9 @@ class LinuxDeploymentTests(unittest.TestCase):
         args=b'\0'.join([b'python',str(deploy.APP/'collect.py').encode(),b'--config',str(deploy.CONFIG).encode(),b'run'])
         with patch.object(Path,'read_text',return_value=stat),patch.object(Path,'read_bytes',return_value=args):
             self.assertEqual(deploy.process_identity(42),'123456')
+        supervised=b'\0'.join([b'python',str(deploy.APP/'supervise.py').encode(),b'--config',str(deploy.CONFIG).encode()])
+        with patch.object(Path,'read_text',return_value=stat),patch.object(Path,'read_bytes',return_value=supervised):
+            self.assertEqual(deploy.process_identity(42),'123456')
         with patch.object(Path,'read_text',return_value=stat),patch.object(Path,'read_bytes',return_value=b'python\0other.py'):
             self.assertIsNone(deploy.process_identity(42))
         with patch.object(Path,'read_text',return_value=stat.replace(') S',') Z')),patch.object(Path,'read_bytes',return_value=args):
@@ -107,6 +113,16 @@ class LinuxDeploymentTests(unittest.TestCase):
                 self.assertRegex(item['sha256'],r'^[0-9a-f]{64}$')
                 self.assertIn(item['url'],shell)
                 self.assertIn(item['sha256'],shell)
+
+    def test_service_escapes_paths_without_credentials(self):
+        with patch.object(deploy,'ROOT',PurePosixPath('/example/a path%name')), \
+             patch.object(deploy,'APP',PurePosixPath('/example/a path%name/app')), \
+             patch.object(deploy,'CONFIG',PurePosixPath('/example/a path%name/config.local.json')):
+            unit=deploy.service_unit()
+        self.assertIn('"/example/a path%%name"',unit)
+        self.assertIn('Restart=on-failure',unit)
+        self.assertIn('KillMode=control-group',unit)
+        self.assertNotIn('secrets.local.json',unit)
 
 
 if __name__=='__main__':unittest.main()

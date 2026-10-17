@@ -46,7 +46,7 @@ def collect(config, secrets):
     day = datetime.now(timezone(timedelta(hours=8))).date().isoformat()
 
     def request(path):
-        raw = get_json(BASE + path, headers=headers, timeout=config.get("timeout", 30))
+        raw = get_json(BASE + path, headers=headers, timeout=config.get("timeout", 30), proxy=config.get("proxy"))
         code = raw.get("code")
         if isinstance(code, bool) or str(code) not in ("0", "200"):
             raise CollectionError("auth" if str(code) in ("401", "403") else "business_error")
