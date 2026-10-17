@@ -67,6 +67,11 @@ Use `docs/README.md` for the product overview and the documentation index. For t
 
 ## Required validation and delivery
 
+Before every firmware compilation, including rebuilds, first show the user an
+up-to-date UI preview rendered from the current firmware sources. For the Cyber
+Meal Card application, prefer the native LVGL renderer in `tools/quota_preview`.
+Generate and display the preview before starting the firmware build.
+
 Run the smallest relevant check while iterating, then run the complete gate before delivery:
 
 ```bash

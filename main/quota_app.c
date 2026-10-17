@@ -46,6 +46,7 @@ void app_main(void) {
     ESP_ERROR_CHECK(bsp_button_init(on_key, NULL));
     bsp_display_backlight(75);
     int64_t activity = esp_timer_get_time(), rendered = 0, rotated = activity, battery_at = 0;
+    int64_t hold_until = 0;
     bool dimmed = false;
     int battery = -1;
     for (;;) {
@@ -53,29 +54,31 @@ void app_main(void) {
         int64_t now = esp_timer_get_time();
         if (xQueueReceive(s_keys, &key, pdMS_TO_TICKS(100)) == pdTRUE) {
             activity = now;
-            if (dimmed) { dimmed = false; bsp_display_backlight(75); }
+            if (dimmed) { dimmed = false; bsp_display_backlight(75); hold_until = now + 30000000; }
             else if (key.event == BSP_BTN_LONG && key.button == BSP_BTN_OK) quota_net_setup();
-            else if (key.event == BSP_BTN_LONG && key.button == BSP_BTN_UP) s_auto = !s_auto;
+            else if (key.event == BSP_BTN_LONG && key.button == BSP_BTN_UP) { s_auto = !s_auto; hold_until = 0; }
             else if (key.event == BSP_BTN_LONG && key.button == BSP_BTN_DOWN) quota_net_connect();
             else if (key.event == BSP_BTN_CLICK) {
                 if (key.button == BSP_BTN_OK) quota_net_refresh();
                 else {
                     s_selection.index = quota_next_provider(s_provider, key.button == BSP_BTN_UP ? -1 : 1, s_page_count);
                     s_selection.collector[0] = 0;
+                    hold_until = now + 30000000;
                 }
             }
             rendered = 0; rotated = now;
         }
         if (!dimmed && now - activity > 45000000) { dimmed = true; bsp_display_backlight(5); }
-        if (s_auto && now - rotated > 10000000) {
-            s_selection.index = quota_next_provider(s_provider, 1, s_page_count);
-            s_selection.collector[0] = 0; rotated = now; rendered = 0;
-        }
         if (now - battery_at >= 30000000 || !battery_at) { battery = battery_ok ? bsp_battery_soc() : -1; battery_at = now; }
         if (now - rendered < 1000000 && rendered) continue;
         quota_view_t view;
         quota_connection_t connection;
         quota_net_read(&s_selection, &view, &connection);
+        if (s_auto && !connection.setup && quota_rotation_due(now, rotated, hold_until)) {
+            s_selection.index = quota_next_provider(view.index, 1, view.count);
+            s_selection.collector[0] = 0; rotated = now;
+            quota_net_read(&s_selection, &view, &connection);
+        }
         s_provider = view.index;
         s_page_count = view.count;
         if (bsp_lvgl_lock(1000)) {

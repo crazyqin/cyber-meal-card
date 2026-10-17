@@ -10,29 +10,53 @@ remaining quotas and reset countdowns. The hardware-test demo is not its startup
 ## Display layout
 
 All accounts use the same quiet 240 x 320 layout: connectivity and battery at the top,
-one service title, a deduplicated account/plan subtitle, three metric cards, then sync status,
-the original collection timestamp and page number. Repeated service names and technical
-plan labels such as currency codes are omitted. Custom account aliases remain visible.
+one service title, three metric areas, then source health,
+collection age and page number. Every service displays its first metric as a large primary value directly
+on the navy background, aligned with the service title. An optional helper line, such as
+TokenHub's allocation note, sits beneath that value. Two compact detail cards keep the same
+positions across services, including ClinePass and ChatGPT. Quota reset countdowns stay beneath
+their values. Dual-currency balances retain separate totals and breakdowns, followed by the
+collected DeepSeek API availability. Missing metrics show `--` in a muted slot, without changing
+the layout or inventing a zero. Short account/plan metadata sits to the right of the service
+title, leaving a 14 px gap before the primary metric label. Generic subtitles such as “remaining quota”
+or “balance details”, repeated service names and technical plan labels are omitted. Custom
+account aliases remain visible in the compact metadata area except for ChatGPT, whose plan
+joins the service title as `ChatGPT Plus` or `ChatGPT Team`: `plus` becomes `Plus`, and
+`team`/`business` becomes `Team`. Other known
+or future plan strings are retained rather than guessing a tier; missing plans stay absent.
 Labels are static; long aliases use ellipses instead of continuous scrolling.
 
 | Service | Metrics |
 | --- | --- |
 | ClinePass | Remaining five-hour, weekly and monthly quota, with reset countdowns |
 | ChatGPT | Remaining quota windows, then available reset credits and the earliest known expiration among available credits |
-| DeepSeek | Total, topped-up and granted balances; dual-currency accounts show both totals and their breakdowns |
+| DeepSeek | Total, topped-up and granted balances; dual-currency accounts show both totals, their breakdowns and API availability |
 | TokenHub | Estimated remaining monthly allocation, monthly spending and today's spending; unlimited allocation is explicit |
 | TeleAgent | Points balance, today's points used and today's points added, across all clients/models |
 
 The Deep Ocean Blue theme uses a dark navy background (`#0B1421`), blue panels (`#15253A`),
 light text (`#EAF3FF`) and blue accents (`#78B7FF`), with warm orange warnings (`#FFBF80`).
-Points have their own unit and never use a currency symbol.
+Points identify their unit in the primary metric label; the TeleAgent header has no separate
+points badge. Points never use a currency symbol.
+Provider titles use distinct accents on the same navy background: ChatGPT mint (`#4FD1A5`),
+ClinePass gold (`#F5C16C`), DeepSeek blue (`#7E9BFF`), TeleAgent cyan (`#58C8E8`) and
+TokenHub violet (`#C29CFF`). Generic providers and setup titles use the standard light text.
+The metric block starts 12 px higher than the previous layout; all services retain the same
+card positions relative to that block.
 
 Amounts consistently use the yuan or dollar symbol and two decimal places. Positive amounts
 below one cent are marked as less than one cent; very large amounts use explicit scientific
 notation. TokenHub's allocation and estimate note appear only next to the estimated balance.
 Unknown values stay unknown. Low quota, over-allocation and stale/error states use a warm
-warning color. Collection times and reset-credit expiration dates use Beijing time (UTC+8).
-Setup and empty states use the same header/footer. Button actions are unchanged.
+warning color. The source timestamp drives collection age, never the device's last download.
+Missing or future timestamps are not labeled as freshly collected; records older than seven
+days show their collection date in Beijing time (UTC+8). Sync activity appears in the header
+without hiding source errors in the footer. ChatGPT shows a countdown to the earliest known
+reset-credit expiry, warning within 24 hours. Elapsed expiry says it awaits collector
+confirmation; the device does not decrement the collected credit count.
+Setup and empty states use the same header/footer. Button actions are unchanged. Manual
+account navigation or waking the dimmed screen pauses automatic rotation for 30 seconds;
+otherwise rotation runs every 10 seconds. Rotation stops on the settings screen.
 
 The presentation logic is independent of LVGL in `main/quota_presentation.c`; the actual
 widgets live in `main/quota_ui.c`. Native screen checks render those same widgets and fonts:

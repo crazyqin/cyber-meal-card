@@ -1,6 +1,7 @@
 #include "quota_ui.h"
 #include "quota_presentation.h"
 #include <stdio.h>
+#include <string.h>
 #include <time.h>
 
 LV_FONT_DECLARE(quota_font_14);
@@ -10,11 +11,22 @@ extern const unsigned quota_font_codepoint_count;
 
 static const uint32_t BG = 0x0B1421, PANEL = 0x15253A, INK = 0xEAF3FF;
 static const uint32_t MUTED = 0x9BB1CC, ACCENT = 0x78B7FF, WARNING = 0xFFBF80;
-static lv_font_t s_number_font;
+static lv_font_t s_number_font, s_large_font;
 static lv_obj_t *s_screen, *s_body, *s_battery, *s_network, *s_network_dot;
 static lv_obj_t *s_title, *s_subtitle, *s_status, *s_status_dot, *s_updated, *s_page, *s_hint;
 static lv_obj_t *s_row[3], *s_name[3], *s_value[3], *s_detail[3], *s_bar[3];
 
+static uint32_t provider_color(const quota_provider_t *provider) {
+    /* Bright title accents remain readable on the shared navy background. */
+    switch (provider->kind) {
+        case QUOTA_CODEX: return 0x4FD1A5;
+        case QUOTA_CLINE: return 0xF5C16C;
+        case QUOTA_DEEPSEEK: return 0x7E9BFF;
+        case QUOTA_TOKENHUB: return 0xC29CFF;
+        case QUOTA_POINTS: return !strcmp(provider->source, "teleagent") ? 0x58C8E8 : INK;
+        default: return INK;
+    }
+}
 static lv_obj_t *text(lv_obj_t *parent, int x, int y, int width, const char *value,
                       const lv_font_t *font, uint32_t color) {
     lv_obj_t *label = lv_label_create(parent);
@@ -46,11 +58,13 @@ static int text_width(const char *value, const lv_font_t *font) {
     lv_text_get_size(&size, value, font, 0, 0, LV_COORD_MAX, LV_TEXT_FLAG_NONE);
     return size.x;
 }
-static void number(lv_obj_t *label, const char *value) {
-    const lv_font_t *font = &s_number_font;
-    if (text_width(value, font) > 104) font = &quota_font_16;
-    if (text_width(value, font) > 104) font = &quota_font_14;
+static void number(lv_obj_t *label, const char *value, int width, bool primary) {
+    const lv_font_t *font = primary ? &s_large_font : &s_number_font;
+    if (text_width(value, font) > width) font = &s_number_font;
+    if (text_width(value, font) > width) font = &quota_font_16;
+    if (text_width(value, font) > width) font = &quota_font_14;
     lv_obj_set_style_text_font(label, font, 0);
+    lv_obj_set_width(label, width);
     lv_obj_set_height(label, font->line_height);
     lv_label_set_text(label, value);
 }
@@ -58,6 +72,8 @@ lv_obj_t *quota_ui_create(void) {
     /* Currency symbols and the unlimited label use the explicit CJK fallback. */
     s_number_font = lv_font_montserrat_20;
     s_number_font.fallback = &quota_font_16;
+    s_large_font = lv_font_montserrat_28;
+    s_large_font.fallback = &quota_font_16;
     s_screen = lv_obj_create(NULL);
     lv_obj_remove_style_all(s_screen);
     lv_obj_set_size(s_screen, 240, 320);
@@ -68,29 +84,32 @@ lv_obj_t *quota_ui_create(void) {
     s_network = text(s_screen, 29, 8, 130, "连接中", &quota_font_14, MUTED);
     s_battery = text(s_screen, 179, 10, 45, "--", &lv_font_montserrat_14, MUTED);
     lv_obj_set_style_text_align(s_battery, LV_TEXT_ALIGN_RIGHT, 0);
-    box(s_screen, 16, 34, 208, 1, 0x2A3D58, 0);
-    s_title = text(s_screen, 16, 44, 208, "订阅用量", &s_number_font, INK);
-    s_subtitle = text(s_screen, 16, 71, 208, "等待同步", &quota_font_14, MUTED);
-    s_body = box(s_screen, 12, 100, 216, 164, BG, 0);
+    s_title = text(s_screen, 16, 36, 208, "订阅用量", &s_number_font, INK);
+    s_subtitle = text(s_screen, 144, 40, 80, "", &quota_font_14, MUTED);
+    lv_obj_set_style_text_align(s_subtitle, LV_TEXT_ALIGN_RIGHT, 0);
+    s_body = box(s_screen, 12, 72, 216, 182, BG, 0);
     for (int i = 0; i < 3; i++) {
-        s_row[i] = box(s_body, 0, i * 56, 216, 52, PANEL, 7);
-        s_name[i] = text(s_row[i], 10, 4, 88, "--", &quota_font_16, INK);
-        s_value[i] = text(s_row[i], 102, 4, 104, "--", &s_number_font, INK);
+        bool primary = i == 0;
+        s_row[i] = box(s_body, 0, primary ? 0 : 80 + (i - 1) * 54, 216, primary ? 74 : 48, PANEL, 7);
+        lv_obj_set_style_bg_opa(s_row[i], primary ? LV_OPA_TRANSP : LV_OPA_COVER, 0);
+        s_name[i] = text(s_row[i], primary ? 4 : 10, 0, primary ? 208 : 88, "--", &quota_font_14, primary ? MUTED : INK);
+        s_value[i] = text(s_row[i], primary ? 4 : 102, 0, primary ? 208 : 104, "--", &s_number_font, INK);
         lv_label_set_long_mode(s_value[i], LV_LABEL_LONG_MODE_CLIP);
-        lv_obj_set_style_text_align(s_value[i], LV_TEXT_ALIGN_RIGHT, 0);
-        s_detail[i] = text(s_row[i], 10, 28, 196, "", &quota_font_14, MUTED);
+        lv_obj_set_style_text_align(s_value[i], primary ? LV_TEXT_ALIGN_LEFT : LV_TEXT_ALIGN_RIGHT, 0);
+        s_detail[i] = text(s_row[i], primary ? 4 : 10, primary ? 50 : 25, primary ? 208 : 196, "", &quota_font_14, MUTED);
         s_bar[i] = lv_bar_create(s_row[i]);
         lv_obj_remove_style_all(s_bar[i]);
-        lv_obj_set_pos(s_bar[i], 10, 49); lv_obj_set_size(s_bar[i], 196, 2);
+        lv_obj_set_pos(s_bar[i], primary ? 4 : 10, primary ? 72 : 46);
+        lv_obj_set_size(s_bar[i], primary ? 208 : 196, 2);
         lv_bar_set_range(s_bar[i], 0, 100);
         lv_obj_set_style_bg_color(s_bar[i], lv_color_hex(0x2E4561), LV_PART_MAIN);
         lv_obj_set_style_bg_opa(s_bar[i], LV_OPA_COVER, LV_PART_MAIN);
         lv_obj_set_style_bg_opa(s_bar[i], LV_OPA_COVER, LV_PART_INDICATOR);
     }
-    s_status_dot = box(s_screen, 17, 278, 5, 5, MUTED, LV_RADIUS_CIRCLE);
-    s_status = text(s_screen, 29, 269, 195, "等待同步", &quota_font_14, MUTED);
-    s_updated = text(s_screen, 16, 296, 164, "采集 --", &quota_font_14, MUTED);
-    s_page = text(s_screen, 171, 296, 53, "1/1", &lv_font_montserrat_14, MUTED);
+    s_status_dot = box(s_screen, 17, 282, 5, 5, MUTED, LV_RADIUS_CIRCLE);
+    s_status = text(s_screen, 29, 273, 195, "等待同步", &quota_font_14, MUTED);
+    s_updated = text(s_screen, 16, 297, 150, "采集 --", &quota_font_14, MUTED);
+    s_page = text(s_screen, 171, 297, 53, "1/1", &lv_font_montserrat_14, MUTED);
     lv_obj_set_style_text_align(s_page, LV_TEXT_ALIGN_RIGHT, 0);
     s_hint = text(s_screen, 16, 106, 208, "", &quota_font_16, INK);
     lv_label_set_long_mode(s_hint, LV_LABEL_LONG_MODE_WRAP);
@@ -111,14 +130,14 @@ unsigned quota_ui_missing_glyphs(void) {
 static const char *status_text(quota_status_t status) {
     switch (status) {
         case QUOTA_OK: return "已同步";
-        case QUOTA_AUTH: return "认证失败，请检查配置";
-        case QUOTA_NETWORK: return "同步失败，保留缓存";
+        case QUOTA_AUTH: return "认证失败 · 检查配置";
+        case QUOTA_NETWORK: return "同步失败 · 保留旧数据";
         case QUOTA_UNSUPPORTED: return "未订阅或接口不可用";
         case QUOTA_THROTTLED: return "请求受限，稍后重试";
         case QUOTA_INVALID: return "采集数据格式不支持";
         case QUOTA_STORAGE: return "保存失败，请重试";
         case QUOTA_BLOCKED: return "访问被拒，请检查网络";
-        case QUOTA_COLLECTOR: return "采集失败，请检查采集器";
+        case QUOTA_COLLECTOR: return "采集失败 · 保留旧数据";
         case QUOTA_ACCOUNT_MISSING: return "未找到账号数据";
         case QUOTA_EMPTY: return "暂无采集账号";
         case QUOTA_LIMIT: return "账号数量已达上限";
@@ -130,14 +149,27 @@ void quota_ui_render(const quota_view_t *view, const quota_connection_t *net,
     const quota_provider_t *p = &view->provider;
     quota_presentation_t content;
     quota_present_provider(p, now, &content);
-    lv_label_set_text(s_title, net->setup ? "设备设置" : content.title);
-    lv_obj_set_style_text_font(s_title, text_width(net->setup ? "设备设置" : content.title, &s_number_font) > 208 ? &quota_font_16 : &s_number_font, 0);
-    lv_label_set_text(s_subtitle, net->setup ? "手机连接设备热点" : content.subtitle);
+    const char *title = net->setup ? "设备设置" : content.title;
+    const char *metadata = net->setup ? "" : content.subtitle;
+    int metadata_width = text_width(metadata, &quota_font_14);
+    if (metadata_width > 80) metadata_width = 80;
+    int title_width = metadata_width ? 208 - metadata_width - 12 : 208;
+    lv_label_set_text(s_title, title);
+    lv_obj_set_width(s_title, title_width);
+    lv_obj_set_style_text_font(s_title, text_width(title, &s_number_font) > title_width ? &quota_font_16 : &s_number_font, 0);
+    lv_obj_set_style_text_color(s_title, lv_color_hex(net->setup ? INK : provider_color(p)), 0);
+    lv_label_set_text(s_subtitle, metadata);
+    visible(s_subtitle, metadata_width > 0);
+    lv_obj_set_pos(s_subtitle, 224 - metadata_width, 40);
+    lv_obj_set_width(s_subtitle, metadata_width ? metadata_width : 1);
     if (battery < 0) lv_label_set_text(s_battery, "--");
     else lv_label_set_text_fmt(s_battery, "%d%%", battery);
-    lv_label_set_text(s_network, net->setup ? "设置中" : net->connecting ? "连接中" : !net->wifi ? "离线" : !net->clock_ready ? "校时中" : "在线");
-    if (automatic && !net->setup && !net->connecting && net->clock_ready)
-        lv_label_set_text(s_network, net->wifi ? "在线 · 轮播" : "离线 · 轮播");
+    lv_label_set_text(s_network, net->setup ? "设置中" : net->connecting ? "连接中" : !net->wifi ? "Wi-Fi 未连接" : !net->clock_ready ? "校时中" : "Wi-Fi 已连接");
+    if (!net->setup && !net->connecting && net->wifi && net->clock_ready) {
+        if (net->syncing) lv_label_set_text(s_network, "Wi-Fi · 同步中");
+        else if (net->sync_wait_seconds) lv_label_set_text_fmt(s_network, "等待 %d 秒同步", net->sync_wait_seconds);
+        else if (automatic) lv_label_set_text(s_network, "Wi-Fi · 轮播");
+    }
     lv_obj_set_style_bg_color(s_network_dot, lv_color_hex(net->wifi ? ACCENT : MUTED), 0);
     visible(s_body, !net->setup && p->updated_at && content.count > 0);
     visible(s_hint, net->setup || !p->updated_at || !content.count);
@@ -150,18 +182,18 @@ void quota_ui_render(const quota_view_t *view, const quota_connection_t *net,
         if (p->status == QUOTA_UNCONFIGURED && net->cos_missing) hint = "尚未配置 COS\n\n长按确定打开设置\n配置后自动同步";
         lv_label_set_text(s_hint, hint);
     }
+    /* Every account uses one open primary metric and two fixed detail slots. */
     for (int i = 0; i < 3; i++) {
         const quota_metric_t *row = &content.rows[i];
-        visible(s_row[i], i < content.count);
-        if (i >= content.count) continue;
-        lv_label_set_text(s_name[i], row->name);
-        number(s_value[i], row->value);
-        lv_obj_set_style_text_color(s_value[i], lv_color_hex(row->warning ? WARNING : INK), 0);
+        bool primary = i == 0, provided = i < content.count;
+        lv_obj_set_y(s_name[i], primary ? 0 : row->detail[0] ? 3 : 14);
+        lv_obj_set_style_text_color(s_name[i], lv_color_hex(primary || !provided ? MUTED : INK), 0);
+        lv_label_set_text(s_name[i], provided ? row->name : "暂无数据");
+        lv_obj_set_y(s_value[i], primary ? 20 : row->detail[0] ? 0 : 11);
+        number(s_value[i], provided ? row->value : "--", primary ? 208 : 104, primary);
+        lv_obj_set_style_text_color(s_value[i], lv_color_hex(!provided ? MUTED : row->warning ? WARNING : INK), 0);
         lv_label_set_text(s_detail[i], row->detail);
         visible(s_detail[i], row->detail[0]);
-        /* Balance-only rows are centered instead of leaving empty helper lines. */
-        lv_obj_set_y(s_name[i], row->detail[0] ? 4 : 15);
-        lv_obj_set_y(s_value[i], row->detail[0] ? 4 : 14);
         visible(s_bar[i], row->progress);
         lv_obj_set_style_bg_color(s_bar[i], lv_color_hex(row->warning ? WARNING : ACCENT), LV_PART_INDICATOR);
         lv_bar_set_value(s_bar[i], row->remaining, LV_ANIM_OFF);
@@ -169,25 +201,19 @@ void quota_ui_render(const quota_view_t *view, const quota_connection_t *net,
     bool stale = quota_is_stale(p, now);
     bool warning = stale || view->discovery_limited || view->discovery_status != QUOTA_OK || !net->wifi ||
         (p->kind == QUOTA_DEEPSEEK && !p->available);
-    const char *status = p->status == QUOTA_OK && stale ? "采集已过期，请检查采集器" :
+    const char *status = p->status == QUOTA_OK && stale ? "采集已过期 · 保留旧数据" :
         p->kind == QUOTA_DEEPSEEK && p->status == QUOTA_OK && !p->available ? "API 余额不可用" : status_text(p->status);
+    if (!p->updated_at && p->status == QUOTA_COLLECTOR) status = "采集失败 · 检查采集器";
+    if (!p->updated_at && p->status == QUOTA_NETWORK) status = "同步失败 · 检查网络";
     if (view->discovery_limited) status = "账号数量已达上限";
-    else if (view->discovery_status != QUOTA_OK && p->status == QUOTA_OK) status = "部分采集器同步失败";
+    else if (view->discovery_status != QUOTA_OK && p->status == QUOTA_OK && !stale) status = "部分采集器同步失败";
     if (net->setup) status = net->save_state == -1 ? "Wi-Fi 错误，配置未保存" : net->save_state == -2 ? "保存失败，请重试" : "确定同步 · 长按下键联网";
-    else if (!net->wifi && !net->connecting) status = "Wi-Fi 未连接";
-    if (net->connecting) status = "正在连接 Wi-Fi...";
-    else if (net->syncing) status = "正在同步...";
-    else if (net->sync_wait_seconds) {
-        lv_label_set_text_fmt(s_status, "%d 秒后同步", net->sync_wait_seconds);
-        status = NULL;
-    }
-    if (status) lv_label_set_text(s_status, status);
+    else if (!net->wifi && p->status == QUOTA_OK && !stale) status = "离线缓存 · 等待联网";
+    lv_label_set_text(s_status, status);
     lv_obj_set_style_bg_color(s_status_dot, lv_color_hex(warning ? WARNING : ACCENT), 0);
     lv_obj_set_style_text_color(s_status, lv_color_hex(warning ? WARNING : MUTED), 0);
-    if (p->updated_at > 1700000000 && !net->setup) {
-        char date[24]; quota_date_label(p->updated_at, date, sizeof(date));
-        lv_label_set_text_fmt(s_updated, "采集 %s", date);
-    } else lv_label_set_text(s_updated, net->setup ? "" : "采集 --");
+    char age[64]; quota_collection_age_label(p->updated_at, now, age, sizeof(age));
+    lv_label_set_text(s_updated, net->setup ? "" : age);
     visible(s_page, !net->setup);
     lv_label_set_text_fmt(s_page, "%d/%d", view->index + 1, view->count);
     /* Rotation is a quiet footer cue and does not alter the account subtitle. */

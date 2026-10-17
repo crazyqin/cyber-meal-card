@@ -21,6 +21,22 @@ void quota_date_label(int64_t timestamp, char *out, unsigned size) {
     snprintf(out, size, "%02d/%02d %02d:%02d", date.tm_mon + 1, date.tm_mday, date.tm_hour, date.tm_min);
 }
 
+void quota_collection_age_label(int64_t collected_at, int64_t now, char *out, unsigned size) {
+    if (collected_at <= 1700000000) snprintf(out, size, "采集 --");
+    else if (now < 1700000000 || now < collected_at) snprintf(out, size, "采集时间待校准");
+    else {
+        int64_t age = now - collected_at;
+        if (age < 60) snprintf(out, size, "刚刚采集");
+        else if (age < 3600) snprintf(out, size, "%lld 分钟前采集", (long long)(age / 60));
+        else if (age < 86400) snprintf(out, size, "%lld 小时前采集", (long long)(age / 3600));
+        else if (age < 604800) snprintf(out, size, "%lld 天前采集", (long long)(age / 86400));
+        else {
+            char date[24]; quota_date_label(collected_at, date, sizeof(date));
+            snprintf(out, size, "采集 %s", date);
+        }
+    }
+}
+
 void quota_money_label(const char *currency, const char *amount, char *out, unsigned size) {
     const char *unit = !strcmp(currency, "CNY") ? "¥" : !strcmp(currency, "USD") ? "$" : currency;
     bool negative = amount[0] == '-';
@@ -89,16 +105,27 @@ static void balance_row(quota_metric_t *row, const char *name, const quota_balan
     snprintf(row->name, sizeof(row->name), "%s", name);
     quota_money_label(b->currency, amount, row->value, sizeof(row->value));
 }
+static const char *chatgpt_plan(const char *plan) {
+    if (same_name(plan, "plus")) return "Plus";
+    if (same_name(plan, "team") || same_name(plan, "business")) return "Team";
+    return plan;
+}
 void quota_present_provider(const quota_provider_t *p, int64_t now, quota_presentation_t *out) {
     memset(out, 0, sizeof(*out));
     const char *canonical = p->kind == QUOTA_CLINE ? "ClinePass" : p->kind == QUOTA_DEEPSEEK ? "DeepSeek" :
                             p->kind == QUOTA_TOKENHUB ? "TokenHub" : p->kind == QUOTA_CODEX ? "ChatGPT" : "订阅用量";
-    snprintf(out->title, sizeof(out->title), "%s", p->label[0] ? p->label : canonical);
-    const char *account = redundant(p, p->account, out->title) || same_name(p->account, canonical) ? "" : p->account;
+    const char *title = p->label[0] ? p->label : canonical;
+    snprintf(out->title, sizeof(out->title), "%s", title);
+    const char *account = p->kind == QUOTA_CODEX || redundant(p, p->account, out->title) || same_name(p->account, canonical) ? "" : p->account;
     const char *plan = redundant(p, p->plan, out->title) || same_name(p->plan, canonical) || same_name(p->plan, account) ? "" : p->plan;
+    if (p->kind == QUOTA_CODEX) plan = chatgpt_plan(plan);
     snprintf(out->subtitle, sizeof(out->subtitle), "%s%s%s", account, account[0] && plan[0] ? " · " : "", plan);
-    if (!out->subtitle[0]) snprintf(out->subtitle, sizeof(out->subtitle), "%s", p->window_count ? "剩余额度" : p->kind == QUOTA_POINTS ? "积分明细" : "余额明细");
-    if (!p->updated_at && !p->label[0]) snprintf(out->subtitle, sizeof(out->subtitle), "等待采集数据");
+    if (p->kind == QUOTA_CODEX) {
+        snprintf(out->title, sizeof(out->title), "%s%s%s", title, plan[0] ? " " : "", plan);
+        out->subtitle[0] = 0;
+    } else if (p->kind == QUOTA_POINTS) {
+        snprintf(out->subtitle, sizeof(out->subtitle), "%s", account);
+    }
     if (!p->updated_at) return;
     if (p->kind == QUOTA_POINTS) {
         const char *names[] = {"积分余额", "今日消耗", "今日新增"};
@@ -107,7 +134,6 @@ void quota_present_provider(const quota_provider_t *p, int64_t now, quota_presen
         for (int i = 0; i < 3; i++) {
             snprintf(out->rows[i].name, sizeof(out->rows[i].name), "%s", names[i]);
             quota_money_label("", values[i], out->rows[i].value, sizeof(out->rows[i].value));
-            snprintf(out->rows[i].detail, sizeof(out->rows[i].detail), "积分");
         }
         return;
     }
@@ -145,6 +171,13 @@ void quota_present_provider(const quota_provider_t *p, int64_t now, quota_presen
                 quota_money_label(b->currency, b->topped_up, topped, sizeof(topped));
                 quota_money_label(b->currency, b->granted, granted, sizeof(granted));
                 snprintf(out->rows[i].detail, sizeof(out->rows[i].detail), "充值 %s  赠送 %s", topped, granted);
+            }
+            /* Keep currencies separate; availability is collected from DeepSeek. */
+            if (p->kind == QUOTA_DEEPSEEK && out->count < 3) {
+                quota_metric_t *row = &out->rows[out->count++];
+                snprintf(row->name, sizeof(row->name), "API 状态");
+                snprintf(row->value, sizeof(row->value), "%s", p->available ? "可用" : "不可用");
+                row->warning = !p->available;
             }
         }
         return;
@@ -190,8 +223,19 @@ void quota_present_provider(const quota_provider_t *p, int64_t now, quota_presen
         else snprintf(row->value, sizeof(row->value), "%d 次", p->reset_count);
         if (p->reset_count == 0) snprintf(row->detail, sizeof(row->detail), "暂无可用重置");
         else if (p->next_reset_expires_at > 0) {
-            char date[24]; quota_date_label(p->next_reset_expires_at, date, sizeof(date));
-            snprintf(row->detail, sizeof(row->detail), "最近到期 %s", date);
+            if (now < 1700000000) snprintf(row->detail, sizeof(row->detail), "等待校时");
+            else if (p->next_reset_expires_at <= now) {
+                snprintf(row->detail, sizeof(row->detail), "已到期 · 待采集确认");
+                row->warning = true;
+            } else {
+                int64_t minutes = (p->next_reset_expires_at - now + 59) / 60;
+                if (minutes >= 1440)
+                    snprintf(row->detail, sizeof(row->detail), "最近到期 %lld天%lld小时", (long long)(minutes / 1440), (long long)(minutes % 1440 / 60));
+                else if (minutes >= 60)
+                    snprintf(row->detail, sizeof(row->detail), "最近到期 %lld小时%lld分", (long long)(minutes / 60), (long long)(minutes % 60));
+                else snprintf(row->detail, sizeof(row->detail), "最近到期 %lld分钟", (long long)minutes);
+                row->warning = p->next_reset_expires_at - now <= 86400;
+            }
         } else snprintf(row->detail, sizeof(row->detail), "到期时间未提供");
     }
 }

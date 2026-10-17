@@ -16,4 +16,5 @@ typedef struct {
 /* Formatting is independent of LVGL, including its no-float printf profile. */
 void quota_money_label(const char *currency, const char *amount, char *out, unsigned size);
 void quota_date_label(int64_t timestamp, char *out, unsigned size);
+void quota_collection_age_label(int64_t collected_at, int64_t now, char *out, unsigned size);
 void quota_present_provider(const quota_provider_t *provider, int64_t now, quota_presentation_t *out);

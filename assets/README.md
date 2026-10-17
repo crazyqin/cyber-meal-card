@@ -24,11 +24,12 @@ the SIL Open Font License 1.1 (`fonts/quota/LICENSE.txt`). Regenerate with
 output and every packed pixel. The 14/16 px LVGL 9 subsets are compiled through
 `main/CMakeLists.txt`, selected explicitly by every Chinese label, and checked
 against all application source characters (`fonts/quota/inventory.txt`). The
-4 bpp PLAIN bitmaps total 44,509 bytes in Flash (19,462 at 14 px and 25,047 at 16 px),
+4 bpp PLAIN bitmaps total 44,532 bytes in Flash (19,469 at 14 px and 25,063 at 16 px),
 without a runtime font-loading buffer. ASCII and Chinese use these fonts; numeric values
-also use built-in Montserrat 20 with an application-owned descriptor and explicit 16 px
-fallback for currency symbols and unlimited values. Helper text uses 14 px and metric names
-use 16 px. Native previews check the actual linked fonts and label styles at both sizes.
+also use built-in Montserrat 20/28 with application-owned descriptors and explicit 16 px
+fallback for currency symbols and unlimited values. Helper text and metric names
+use 14 px. All primary metrics use 28 px numbers, with smaller fonts chosen when needed to
+fit the available width. Native previews check the actual linked fonts and label styles.
 
 ## Images
 

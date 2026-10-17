@@ -12,6 +12,13 @@ static cJSON *json(const char *text) { cJSON *j = cJSON_Parse(text); assert(j); 
 #endif
 int main(void) {
     float remaining;
+    assert(!quota_rotation_due(9999999,0,0));
+    assert(quota_rotation_due(10000000,0,0));
+    assert(!quota_rotation_due(29999999,0,30000000));
+    assert(quota_rotation_due(30000000,0,30000000));
+    assert(!quota_rotation_due(39999999,30000000,30000000));
+    assert(quota_rotation_due(40000000,30000000,30000000));
+    assert(!quota_rotation_due(30000000,40000000,0));
     assert(quota_sync_wait_seconds(10000,0,true)==0);
     assert(quota_sync_wait_seconds(9999,0,true)==1);
     assert(quota_sync_wait_seconds(0,0,true)==10);

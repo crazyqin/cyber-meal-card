@@ -35,7 +35,7 @@
 #define REFRESH_BIT 1
 #define SETUP_BIT 2
 #define CONNECT_BIT 4
-#define FIRMWARE_TAG "20261017-collector-recovery"
+#define FIRMWARE_TAG "20261017-joined-titles"
 typedef struct { uint32_t version, generation; quota_snapshot_t snapshot; } quota_cache_t;
 static quota_config_t s_config;
 static quota_snapshot_t s_snapshot;

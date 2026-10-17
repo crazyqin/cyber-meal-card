@@ -75,6 +75,9 @@ void quota_select(const quota_snapshot_t *s, quota_selection_t *selection, quota
     view->discovery_status = s->discovery_status;
     view->discovery_limited = s->discovery_limited;
 }
+bool quota_rotation_due(int64_t now_us, int64_t rotated_us, int64_t hold_until_us) {
+    return now_us >= hold_until_us && now_us >= rotated_us && now_us - rotated_us >= 10000000;
+}
 bool quota_is_stale(const quota_provider_t *p, int64_t now) {
     return p->updated_at <= 0 || now < p->updated_at || now - p->updated_at > 900 || p->status != QUOTA_OK;
 }

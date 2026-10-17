@@ -65,6 +65,7 @@ typedef struct {
 
 bool quota_remaining(double used, float *remaining);
 int quota_next_provider(int current, int direction, int count);
+bool quota_rotation_due(int64_t now_us, int64_t rotated_us, int64_t hold_until_us);
 void quota_select(const quota_snapshot_t *snapshot, quota_selection_t *selection, quota_view_t *view);
 int quota_sync_wait_seconds(int64_t now_ms, int64_t last_ms, bool manual);
 bool quota_is_stale(const quota_provider_t *provider, int64_t now);

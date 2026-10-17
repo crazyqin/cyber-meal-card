@@ -20,10 +20,10 @@
 Font License 1.1 分发（`fonts/quota/LICENSE.txt`）。使用 Pillow 12.3.0 运行
 `python tools/generate_quota_font.py` 可重新生成；`--check` 校验输出一致性和逐像素打包结果。
 14／16 px LVGL 9 子集由 `main/CMakeLists.txt` 编译，每个中文标签显式选用，字符覆盖检查扫描全部应用源码，
-清单保存在 `fonts/quota/inventory.txt`。4 bpp PLAIN 位图共占 Flash 44,509 字节（14 px 为 19,462，16 px 为
-25,047），不需要运行时字库加载缓冲区。ASCII 与中文使用这些字库，数值另用内置 Montserrat 20，
-通过应用持有的字体描述符显式回退到 16 px，显示货币符号和不限额。说明文字使用 14 px，数据项名称
-使用 16 px；本机预览检查两种字号实际链接的字体和标签样式。
+清单保存在 `fonts/quota/inventory.txt`。4 bpp PLAIN 位图共占 Flash 44,532 字节（14 px 为 19,469，16 px 为
+25,063），不需要运行时字库加载缓冲区。ASCII 与中文使用这些字库，数值另用内置 Montserrat 20／28，
+通过应用持有的字体描述符显式回退到 16 px，显示货币符号和不限额。说明文字及数据项名称
+统一使用 14 px；所有主指标数值使用 28 px，超宽时选用较小字号。本机预览检查实际链接的字体和标签样式。
 
 ## 图片（images）
 

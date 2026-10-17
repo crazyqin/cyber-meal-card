@@ -35,6 +35,8 @@ static void check(lv_obj_t *obj, bool hidden) {
         }
         lv_area_t area; lv_obj_get_coords(obj, &area);
         assert(area.x1 >= 0 && area.y1 >= 0 && area.x2 < 240 && area.y2 < 320);
+        lv_area_t parent; lv_obj_get_coords(lv_obj_get_parent(obj), &parent);
+        assert(area.x1 >= parent.x1 && area.y1 >= parent.y1 && area.x2 <= parent.x2 && area.y2 <= parent.y2);
         lv_label_long_mode_t mode = lv_label_get_long_mode(obj);
         assert(mode != LV_LABEL_LONG_MODE_SCROLL && mode != LV_LABEL_LONG_MODE_SCROLL_CIRCULAR);
         if (mode == LV_LABEL_LONG_MODE_CLIP) {
@@ -43,6 +45,15 @@ static void check(lv_obj_t *obj, bool hidden) {
         }
     }
     for (unsigned i=0; i<lv_obj_get_child_count(obj); i++) check(lv_obj_get_child(obj,(int)i),hidden);
+}
+static lv_obj_t *label_with_text(lv_obj_t *obj, const char *value) {
+    if (lv_obj_has_flag(obj,LV_OBJ_FLAG_HIDDEN)) return NULL;
+    if (lv_obj_check_type(obj,&lv_label_class) && !strcmp(lv_label_get_text(obj),value)) return obj;
+    for (unsigned i=0;i<lv_obj_get_child_count(obj);i++) {
+        lv_obj_t *found=label_with_text(lv_obj_get_child(obj,(int)i),value);
+        if (found) return found;
+    }
+    return NULL;
 }
 static void save(lv_obj_t *screen, const char *folder, const char *name, quota_view_t *view,
                  quota_connection_t *net, int64_t now) {
@@ -81,12 +92,22 @@ int main(int argc,char **argv) {
     p->windows[1]=(quota_window_t){.minutes=10080,.remaining=64,.resets_at=now+86400*3+3600};
     p->windows[2]=(quota_window_t){.minutes=43200,.remaining=91,.resets_at=now+86400*12};
     save(screen,argv[1],"clinepass",&view,&net,now);
+    p->window_count=2;
+    save(screen,argv[1],"two-windows",&view,&net,now);
+    assert(label_with_text(screen,"暂无数据"));
+    assert(!label_with_text(screen,"91%")); /* Missing slots must not retain another page's value. */
     p->kind=QUOTA_DEEPSEEK; p->window_count=0; p->balance_count=1; p->available=true; view.index=1;
     strcpy(p->label,"DeepSeek"); strcpy(p->account,"deepseek"); strcpy(p->plan,"API");
     p->balances[0]=(quota_balance_t){.currency="CNY",.total="126.38",.topped_up="120",.granted="6.38"};
     save(screen,argv[1],"deepseek",&view,&net,now);
+    lv_obj_t *primary=label_with_text(screen,"¥126.38"); assert(primary);
+    assert(lv_obj_get_style_text_font(primary,LV_PART_MAIN)->line_height==lv_font_montserrat_28.line_height);
     p->balance_count=2; p->balances[1]=(quota_balance_t){.currency="USD",.total="12.02",.topped_up="10",.granted="2.02"};
     save(screen,argv[1],"dual-currency",&view,&net,now);
+    p->available=false;
+    save(screen,argv[1],"dual-unavailable",&view,&net,now);
+    assert(label_with_text(screen,"不可用"));
+    p->available=true;
     p->kind=QUOTA_TOKENHUB; view.index=2;
     strcpy(p->label,"TokenHub"); strcpy(p->account,"tokenhub"); strcpy(p->plan,"CNY / estimated");
     p->balances[0]=(quota_balance_t){.currency="CNY",.total="82.64",.granted="100",.topped_up="17.36"};
@@ -95,27 +116,49 @@ int main(int argc,char **argv) {
     strcpy(p->balances[0].granted,"不限额"); strcpy(p->balances[0].total,"--");
     save(screen,argv[1],"unlimited",&view,&net,now);
     p->kind=QUOTA_CODEX; p->balance_count=0; p->window_count=2; view.index=3;
-    strcpy(p->label,"ChatGPT"); strcpy(p->source,"chatgpt"); strcpy(p->account,"chatgpt"); strcpy(p->plan,"Plus");
+    strcpy(p->label,"ChatGPT"); strcpy(p->source,"chatgpt"); strcpy(p->account,"personal"); strcpy(p->plan,"plus");
     p->windows[0]=(quota_window_t){.minutes=300,.remaining=73,.resets_at=now+7200};
     p->windows[1]=(quota_window_t){.minutes=10080,.remaining=12,.resets_at=now+86400*2};
     p->reset_count=3; p->latest_reset_expires_at=now+86400*7;
     p->next_reset_expires_at=now+86400*2;
     save(screen,argv[1],"chatgpt",&view,&net,now);
+    assert(label_with_text(screen,"ChatGPT Plus"));
+    assert(!label_with_text(screen,"Plus"));
+    assert(!label_with_text(screen,"personal"));
+    strcpy(p->plan,"business"); view.index=5;
+    save(screen,argv[1],"chatgpt-team",&view,&net,now);
+    assert(label_with_text(screen,"ChatGPT Team"));
+    assert(!label_with_text(screen,"Team"));
+    strcpy(p->plan,"plus"); view.index=3;
     p->reset_count=0;
     save(screen,argv[1],"zero-reset",&view,&net,now);
     p->reset_count=-1; p->next_reset_expires_at=0;
     save(screen,argv[1],"unknown-reset",&view,&net,now);
+    p->reset_count=3; p->next_reset_expires_at=now+3600;
+    save(screen,argv[1],"expiring-reset",&view,&net,now);
+    save(screen,argv[1],"expired-reset",&view,&net,now+3600);
     quota_provider_t chatgpt=*p;
     memset(p,0,sizeof(*p)); p->kind=QUOTA_POINTS; p->updated_at=now; p->status=QUOTA_OK; view.index=4;
     strcpy(p->label,"TeleAgent"); strcpy(p->source,"teleagent"); strcpy(p->account,"teleagent");
     p->points=(quota_points_t){.balance="12345.67",.spent_today="12.34",.added_today="100"};
     save(screen,argv[1],"teleagent",&view,&net,now);
+    assert(!label_with_text(screen,"积分"));
+    assert(label_with_text(screen,"积分余额"));
     strcpy(p->points.spent_today,"0"); strcpy(p->points.added_today,"0");
     save(screen,argv[1],"teleagent-zero",&view,&net,now);
     *p=chatgpt; view.index=3;
     save(screen,argv[1],"stale",&view,&net,now+901);
     net.wifi=false; save(screen,argv[1],"offline",&view,&net,now);
     net.wifi=true; net.syncing=true; save(screen,argv[1],"syncing",&view,&net,now);
+    p->status=QUOTA_COLLECTOR;
+    save(screen,argv[1],"failed-syncing",&view,&net,now);
+    assert(label_with_text(screen,"采集失败 · 保留旧数据"));
+    assert(label_with_text(screen,"Wi-Fi · 同步中"));
+    net.syncing=false; net.sync_wait_seconds=7;
+    save(screen,argv[1],"failed-waiting",&view,&net,now);
+    assert(label_with_text(screen,"采集失败 · 保留旧数据"));
+    assert(label_with_text(screen,"等待 7 秒同步"));
+    net.sync_wait_seconds=0; p->status=QUOTA_OK;
     net.syncing=false; net.setup=true;
     strcpy(net.ap_name,"AI-Passport-1234"); strcpy(net.ap_password,"sample1234");
     save(screen,argv[1],"setup",&view,&net,now);
