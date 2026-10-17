@@ -1,0 +1,13 @@
+# Pinned Linux runtime sources; archive SHA256 checked before extraction.
+PYTHON_X86_64_URL='https://github.com/astral-sh/python-build-standalone/releases/download/20261013/cpython-3.12.15%2B20261013-x86_64-unknown-linux-gnu-install_only_stripped.tar.gz'
+PYTHON_X86_64_SHA256='178d3d83b6e8e99285a65d3fce9c16b87952cc5efdb4d1a0e3ff3be18ff0fc9c'
+CODEX_X86_64_URL='https://github.com/openai/codex/releases/download/rust-v0.163.0/codex-x86_64-unknown-linux-musl.tar.gz'
+CODEX_X86_64_SHA256='beb339e8ecd9ba057a6bb2dc81ad8ca474812edfbf0fc5056ca818797648dde4'
+NODE_X86_64_URL='https://nodejs.org/dist/v24.19.0/node-v24.19.0-linux-x64.tar.gz'
+NODE_X86_64_SHA256='f625d97cd707df4ff96254916fbc5ff014f09c09effe5a1e0ca8f6d41a8789d4'
+PYTHON_AARCH64_URL='https://github.com/astral-sh/python-build-standalone/releases/download/20261013/cpython-3.12.15%2B20261013-aarch64-unknown-linux-gnu-install_only_stripped.tar.gz'
+PYTHON_AARCH64_SHA256='9467a99bacc7d90b64b02de7fa9ecfc99b72905e64e74f7ff6b460ad95cfed5a'
+CODEX_AARCH64_URL='https://github.com/openai/codex/releases/download/rust-v0.163.0/codex-aarch64-unknown-linux-musl.tar.gz'
+CODEX_AARCH64_SHA256='a7261e65f4a96d8f4ca65a069c6cf2dc2c33defc341e48078acefda9461fffe4'
+NODE_AARCH64_URL='https://nodejs.org/dist/v24.19.0/node-v24.19.0-linux-arm64.tar.gz'
+NODE_AARCH64_SHA256='d28c8a5bf0a808f0ed434a1dce8c54ae98f0371c0bd86ac58abc613f73e6643f'

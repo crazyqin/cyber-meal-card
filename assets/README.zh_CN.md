@@ -15,6 +15,16 @@
 - 添加字库前评估 Flash 与内部 RAM 影响；ESP32-C3 无 PSRAM。
 - 不提交许可不允许分发的字库。
 
+订阅详情应用使用 `fonts/quota/NotoSansCJKsc-Regular.otf`，来源为
+[Noto CJK](https://github.com/notofonts/noto-cjk/tree/main/Sans)，按 SIL Open
+Font License 1.1 分发（`fonts/quota/LICENSE.txt`）。使用 Pillow 12.3.0 运行
+`python tools/generate_quota_font.py` 可重新生成；`--check` 校验输出一致性和逐像素打包结果。
+14／16 px LVGL 9 子集由 `main/CMakeLists.txt` 编译，每个中文标签显式选用，字符覆盖检查扫描全部应用源码，
+清单保存在 `fonts/quota/inventory.txt`。4 bpp PLAIN 位图共占 Flash 44,509 字节（14 px 为 19,462，16 px 为
+25,047），不需要运行时字库加载缓冲区。ASCII 与中文使用这些字库，数值另用内置 Montserrat 20，
+通过应用持有的字体描述符显式回退到 16 px，显示货币符号和不限额。说明文字使用 14 px，数据项名称
+使用 16 px；本机预览检查两种字号实际链接的字体和标签样式。
+
 ## 图片（images）
 
 可复用的源图与生成的显示资产放在 `images/`。
@@ -39,3 +49,9 @@
 - 与当前 BSP 音频路径匹配时优先采用 16 kHz、16 位单声道 PCM。
 - 嵌入音频前评估 Flash 与内部 RAM 成本；长录音应流式或分块。
 - 无再分发许可不提交媒体文件。
+
+离线配置备份页打包了
+[Project Nayuki QR Code generator v1.8.0](https://github.com/nayuki/QR-Code-generator/releases/tag/v1.8.0)，
+路径为 `qr/qrcodegen-v1.8.0-es6.js`，未修改，保留文件内 MIT 许可。
+SHA256：`6a1116192ed1dd67fa1bf31e77f5817103d71c23bbac24c382e698b7668bdd01`。
+脚本在设备本地提供，不会将配置传给外部二维码服务。

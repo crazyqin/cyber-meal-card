@@ -1,0 +1,17 @@
+cmake_minimum_required(VERSION 3.20)
+project(quota_preview C CXX ASM)
+get_filename_component(REPO "${CMAKE_CURRENT_LIST_DIR}/../.." ABSOLUTE)
+set(LV_BUILD_CONF_PATH "${CMAKE_CURRENT_LIST_DIR}/lv_conf.h" CACHE PATH "" FORCE)
+set(CONFIG_LV_BUILD_DEMOS OFF CACHE BOOL "" FORCE)
+set(CONFIG_LV_BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
+set(CONFIG_LV_USE_THORVG_INTERNAL OFF CACHE BOOL "" FORCE)
+add_subdirectory("${REPO}/managed_components/lvgl__lvgl" lvgl)
+add_executable(quota_preview "${REPO}/tests/test_quota_ui.c"
+    "${REPO}/main/quota_ui.c" "${REPO}/main/quota_presentation.c" "${REPO}/main/quota_model.c"
+    "${REPO}/assets/fonts/quota/quota_font_14.c" "${REPO}/assets/fonts/quota/quota_font_16.c")
+target_include_directories(quota_preview PRIVATE "${REPO}/main")
+target_link_libraries(quota_preview PRIVATE lvgl)
+target_compile_options(quota_preview PRIVATE -Wall -Wextra -Werror)
+if(NOT WIN32)
+    target_link_libraries(quota_preview PRIVATE m)
+endif()

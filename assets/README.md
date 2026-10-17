@@ -17,6 +17,19 @@ Store reusable font files and generated font sources in `fonts/`.
 - Check Flash and internal-RAM impact before adding a font; the ESP32-C3 has no PSRAM.
 - Do not commit fonts whose license does not permit redistribution.
 
+The subscription viewer uses `fonts/quota/NotoSansCJKsc-Regular.otf` from
+[Noto CJK](https://github.com/notofonts/noto-cjk/tree/main/Sans), licensed under
+the SIL Open Font License 1.1 (`fonts/quota/LICENSE.txt`). Regenerate with
+`python tools/generate_quota_font.py` using Pillow 12.3.0; `--check` verifies identical
+output and every packed pixel. The 14/16 px LVGL 9 subsets are compiled through
+`main/CMakeLists.txt`, selected explicitly by every Chinese label, and checked
+against all application source characters (`fonts/quota/inventory.txt`). The
+4 bpp PLAIN bitmaps total 44,509 bytes in Flash (19,462 at 14 px and 25,047 at 16 px),
+without a runtime font-loading buffer. ASCII and Chinese use these fonts; numeric values
+also use built-in Montserrat 20 with an application-owned descriptor and explicit 16 px
+fallback for currency symbols and unlimited values. Helper text uses 14 px and metric names
+use 16 px. Native previews check the actual linked fonts and label styles at both sizes.
+
 ## Images
 
 Store reusable source images and generated display assets in `images/`.
@@ -41,3 +54,9 @@ Store reusable music and sound-effect sources in `music/`.
 - Prefer 16 kHz, 16-bit mono PCM when it matches the current BSP audio path.
 - Check Flash and internal-RAM cost before embedding audio; stream or chunk long recordings.
 - Do not commit media without redistribution permission.
+
+The offline configuration-backup page bundles
+[Project Nayuki QR Code generator v1.8.0](https://github.com/nayuki/QR-Code-generator/releases/tag/v1.8.0)
+at `qr/qrcodegen-v1.8.0-es6.js`, unchanged under its embedded MIT license.
+SHA256: `6a1116192ed1dd67fa1bf31e77f5817103d71c23bbac24c382e698b7668bdd01`.
+It is served locally; no external QR service receives configuration data.

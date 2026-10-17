@@ -4,6 +4,36 @@ sdkconfig.old
 managed_components/
 .vscode/
 .idea/
+__pycache__/
+*.pyc
+.venv/
+node_modules/
+*.local.json
+key.txt
+auth.json
+.http-auth.json
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.p12
+*.pfx
+*.log
+*.bin
+*.elf
+*.map
+*.tar.gz
+*.zip
+*.bundle
+/collector/state/
+/collector/accounts/
+/collector/settings/
+.runtime/
+.downloads/
+!/collector/tokenhub_runtime/waf_runtime/vendor/sdenv/build/
+!/collector/tokenhub_runtime/waf_runtime/vendor/sdenv/build/Release/
+!/collector/tokenhub_runtime/waf_runtime/vendor/sdenv/build/Release/documentAll.js
 
 # Generated repository-local links; canonical skill sources live in skills/.
 /.agents/skills/passport-develop

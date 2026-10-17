@@ -1,0 +1,13 @@
+{
+  "name": "tokenhub-local-waf-runtime",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Local JavaScript execution only; HTTP is performed by Python.",
+  "engines": { "node": ">=24 <25" },
+  "dependencies": {
+    "@napi-rs/canvas": "1.0.11",
+    "sdenv-jsdom": "2.1.0",
+    "sdenv-extend": "1.8.2",
+    "log4js": "6.9.1"
+  }
+}

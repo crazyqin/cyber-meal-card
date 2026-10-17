@@ -14,9 +14,14 @@ The default partition table contains exactly:
 
 | Partition | Type/subtype | Offset | Size | Purpose |
 | --- | --- | ---: | ---: | --- |
-| `nvs` | data/NVS | `0x9000` | `0x6000` | ESP-IDF and application key-value storage |
-| `phy_init` | data/PHY | `0xF000` | `0x1000` | PHY initialization data |
-| `factory` | app/factory | `0x10000` | `0x7F0000` | The single application image; all remaining Flash |
+| `nvs` | data/NVS | `0x9000` | `0x10000` | ESP-IDF, account credentials and cached quotas |
+| `phy_init` | data/PHY | `0x19000` | `0x1000` | PHY initialization data |
+| `factory` | app/factory | `0x20000` | `0x7E0000` | The single application image; all remaining Flash |
+
+This application's NVS reserves 64 KiB for account configuration, atomic
+configuration replacement and quota snapshots.
+The upstream hardware-test baseline uses a smaller NVS and an app at `0x10000`;
+this custom layout requires the matching partition table and merged image.
 
 The default has no OTA slots. This is a starting point, not a restriction on
 user firmware.

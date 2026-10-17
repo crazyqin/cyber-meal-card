@@ -1,0 +1,27 @@
+{
+  "schema_version": 2,
+  "collector_id": "auto",
+  "interval_seconds": 300,
+  "state_dir": "state",
+  "secrets_file": "secrets.local.json",
+  "cos": {
+    "bucket": "example-1250000000",
+    "region": "ap-shanghai",
+    "prefix": "codex-usage",
+    "secret_id_ref": "COS_SECRET_ID",
+    "secret_key_ref": "COS_SECRET_KEY",
+    "token_ref": "COS_SESSION_TOKEN"
+  },
+  "accounts": [
+    {"id": "chatgpt-main", "name": "personal", "provider": "chatgpt", "enabled": true,
+     "codex_home": "~/.codex", "collect_usage": true},
+    {"id": "clinepass-main", "name": "personal", "provider": "clinepass", "enabled": false,
+     "api_key_ref": "CLINE_API_KEY"},
+    {"id": "deepseek-main", "name": "personal", "provider": "deepseek", "enabled": false,
+     "api_key_ref": "DEEPSEEK_API_KEY"},
+    {"id": "tokenhub-main", "name": "work", "provider": "tokenhub", "enabled": false,
+     "auth_file": "tokenhub-auth.local.json", "account_id": "telecom-work"},
+    {"id": "teleagent-main", "name": "teleagent", "provider": "teleagent", "enabled": false,
+     "auth_file": "teleagent-auth.local.json"}
+  ]
+}

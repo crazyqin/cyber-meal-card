@@ -1,0 +1,20 @@
+* text=auto
+*.sh text eol=lf
+*.py text eol=lf
+*.c text eol=lf
+*.h text eol=lf
+*.js text eol=lf
+*.cjs text eol=lf
+*.json text eol=lf
+*.md text eol=lf
+*.txt text eol=lf
+*.cmd text eol=crlf
+*.otf binary
+*.ttf binary
+*.png binary
+*.jpg binary
+
+# Preserve meaningful spaces in the generated glyph inventory and pinned vendors.
+assets/fonts/quota/inventory.txt whitespace=-blank-at-eol
+assets/qr/qrcodegen-v1.8.0-es6.js whitespace=-blank-at-eol
+collector/tokenhub_runtime/waf_runtime/vendor/sdenv/browser/chrome/URL.js whitespace=-blank-at-eof
