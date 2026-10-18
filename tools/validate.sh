@@ -82,6 +82,9 @@ run_static_checks() {
         -o "${test_dir}/test_quota_presentation"
     "${test_dir}/test_quota_presentation"
     "${CC:-cc}" -std=c11 -Wall -Wextra -Werror -Imain \
+        tests/test_quota_settings.c main/quota_settings.c -o "${test_dir}/test_quota_settings"
+    "${test_dir}/test_quota_settings"
+    "${CC:-cc}" -std=c11 -Wall -Wextra -Werror -Imain \
         tests/test_quota_setup_access.c main/quota_setup_access.c \
         -o "${test_dir}/test_quota_setup_access"
     "${test_dir}/test_quota_setup_access"

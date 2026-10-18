@@ -8,6 +8,7 @@ set(CONFIG_LV_USE_THORVG_INTERNAL OFF CACHE BOOL "" FORCE)
 add_subdirectory("${REPO}/managed_components/lvgl__lvgl" lvgl)
 add_executable(quota_preview "${REPO}/tests/test_quota_ui.c"
     "${REPO}/main/quota_ui.c" "${REPO}/main/quota_presentation.c" "${REPO}/main/quota_model.c"
+    "${REPO}/main/quota_settings.c"
     "${REPO}/assets/fonts/quota/quota_font_14.c" "${REPO}/assets/fonts/quota/quota_font_16.c")
 target_include_directories(quota_preview PRIVATE "${REPO}/main")
 target_link_libraries(quota_preview PRIVATE lvgl)

@@ -20,6 +20,14 @@ static void flush(lv_display_t *display, const lv_area_t *area, uint8_t *pixels)
 }
 static void check(lv_obj_t *obj, bool hidden) {
     hidden = hidden || lv_obj_has_flag(obj, LV_OBJ_FLAG_HIDDEN);
+    if (!hidden && lv_obj_get_parent(obj)) {
+        /* Progress tracks and battery fills must stay inside their cards too. */
+        lv_area_t area, parent;
+        lv_obj_get_coords(obj, &area);
+        lv_obj_get_coords(lv_obj_get_parent(obj), &parent);
+        assert(area.x1 >= 0 && area.y1 >= 0 && area.x2 < 240 && area.y2 < 320);
+        assert(area.x1 >= parent.x1 && area.y1 >= parent.y1 && area.x2 <= parent.x2 && area.y2 <= parent.y2);
+    }
     if (lv_obj_check_type(obj, &lv_label_class) && !hidden) {
         s_labels++;
         const lv_font_t *font = lv_obj_get_style_text_font(obj, LV_PART_MAIN);
@@ -33,15 +41,14 @@ static void check(lv_obj_t *obj, bool hidden) {
                 fprintf(stderr,"Missing label glyph U+%04x: %s\n",(unsigned)cp,text); abort();
             }
         }
-        lv_area_t area; lv_obj_get_coords(obj, &area);
-        assert(area.x1 >= 0 && area.y1 >= 0 && area.x2 < 240 && area.y2 < 320);
-        lv_area_t parent; lv_obj_get_coords(lv_obj_get_parent(obj), &parent);
-        assert(area.x1 >= parent.x1 && area.y1 >= parent.y1 && area.x2 <= parent.x2 && area.y2 <= parent.y2);
         lv_label_long_mode_t mode = lv_label_get_long_mode(obj);
         assert(mode != LV_LABEL_LONG_MODE_SCROLL && mode != LV_LABEL_LONG_MODE_SCROLL_CIRCULAR);
         if (mode == LV_LABEL_LONG_MODE_CLIP) {
             lv_point_t size; lv_text_get_size(&size,text,font,0,0,LV_COORD_MAX,LV_TEXT_FLAG_NONE);
             assert(size.x <= lv_obj_get_width(obj));
+        } else if (mode == LV_LABEL_LONG_MODE_WRAP) {
+            lv_point_t size; lv_text_get_size(&size,text,font,0,0,lv_obj_get_width(obj),LV_TEXT_FLAG_NONE);
+            assert(size.y <= lv_obj_get_height(obj));
         }
     }
     for (unsigned i=0; i<lv_obj_get_child_count(obj); i++) check(lv_obj_get_child(obj,(int)i),hidden);
@@ -55,10 +62,8 @@ static lv_obj_t *label_with_text(lv_obj_t *obj, const char *value) {
     }
     return NULL;
 }
-static void save(lv_obj_t *screen, const char *folder, const char *name, quota_view_t *view,
-                 quota_connection_t *net, int64_t now) {
+static void capture(lv_obj_t *screen, const char *folder, const char *name) {
     printf("Rendering %s\n",name);
-    quota_ui_render(view,net,78,false,now);
     lv_obj_update_layout(screen);
     check(screen,false);
     lv_refr_now(NULL);
@@ -71,6 +76,11 @@ static void save(lv_obj_t *screen, const char *folder, const char *name, quota_v
         assert(fwrite(rgb,1,3,file)==3);
     }
     fclose(file);
+}
+static void save(lv_obj_t *screen, const char *folder, const char *name, quota_view_t *view,
+                 quota_connection_t *net, int64_t now) {
+    quota_ui_render(view,net,78,false,now);
+    capture(screen,folder,name);
 }
 int main(int argc,char **argv) {
     setbuf(stdout,NULL); setbuf(stderr,NULL);
@@ -101,7 +111,7 @@ int main(int argc,char **argv) {
     p->balances[0]=(quota_balance_t){.currency="CNY",.total="126.38",.topped_up="120",.granted="6.38"};
     save(screen,argv[1],"deepseek",&view,&net,now);
     lv_obj_t *primary=label_with_text(screen,"¥126.38"); assert(primary);
-    assert(lv_obj_get_style_text_font(primary,LV_PART_MAIN)->line_height==lv_font_montserrat_28.line_height);
+    assert(lv_obj_get_style_text_font(primary,LV_PART_MAIN)->line_height==lv_font_montserrat_36.line_height);
     p->balance_count=2; p->balances[1]=(quota_balance_t){.currency="USD",.total="12.02",.topped_up="10",.granted="2.02"};
     save(screen,argv[1],"dual-currency",&view,&net,now);
     p->available=false;
@@ -149,6 +159,15 @@ int main(int argc,char **argv) {
     *p=chatgpt; view.index=3;
     save(screen,argv[1],"stale",&view,&net,now+901);
     net.wifi=false; save(screen,argv[1],"offline",&view,&net,now);
+    net.connecting=true;
+    save(screen,argv[1],"connecting",&view,&net,now);
+    assert(label_with_text(screen,"连接 Wi-Fi"));
+    net.connecting=false;
+    p->status=QUOTA_NETWORK;
+    save(screen,argv[1],"connect-failed",&view,&net,now);
+    assert(label_with_text(screen,"同步失败 · 保留旧数据"));
+    assert(label_with_text(screen,"73%"));
+    p->status=QUOTA_OK;
     net.wifi=true; net.syncing=true; save(screen,argv[1],"syncing",&view,&net,now);
     p->status=QUOTA_COLLECTOR;
     save(screen,argv[1],"failed-syncing",&view,&net,now);
@@ -162,6 +181,9 @@ int main(int argc,char **argv) {
     net.syncing=false; net.setup=true;
     strcpy(net.ap_name,"AI-Passport-1234"); strcpy(net.ap_password,"sample1234");
     save(screen,argv[1],"setup",&view,&net,now);
+    net.config_failed=true; net.save_state=-1;
+    save(screen,argv[1],"setup-failed",&view,&net,now);
+    net.config_failed=false; net.save_state=0;
     net.setup=false; p->updated_at=0; p->status=QUOTA_EMPTY;
     save(screen,argv[1],"empty",&view,&net,now);
     p->status=QUOTA_UNCONFIGURED; net.cos_missing=1;
@@ -175,10 +197,83 @@ int main(int argc,char **argv) {
     strcpy(p->balances[0].total,"-999999999.99");
     save(screen,argv[1],"negative-large",&view,&net,now);
     /* Repeated navigation must not accumulate widgets, animations or heap use. */
+    const int batteries[]={-1,0,1,20,21,78,100,105};
     for (int i=0;i<100;i++) {
         net.syncing=(i%3)==0; net.wifi=(i%5)!=0;
-        quota_ui_render(&view,&net,i%2 ? 78 : -1,i%2,now);
+        quota_ui_render(&view,&net,batteries[i%8],i%2,now);
+        lv_obj_update_layout(screen);
+        check(screen,false);
+        if (batteries[i%8] == 100) {
+            lv_obj_t *battery=label_with_text(screen,"100%"); assert(battery);
+            lv_point_t size;
+            lv_text_get_size(&size,"100%",&lv_font_montserrat_14,0,0,LV_COORD_MAX,LV_TEXT_FLAG_NONE);
+            assert(size.x <= lv_obj_get_width(battery));
+        }
         lv_refr_now(NULL);
+    }
+    quota_preferences_t prefs; quota_preferences_default(&prefs);
+    quota_settings_t settings; quota_settings_open(&settings);
+    net=(quota_connection_t){.wifi=true,.clock_ready=true}; *p=chatgpt;
+    for (int i=0;i<QUOTA_SETTING_COUNT;i++) {
+        settings.selected=(quota_setting_item_t)i;
+        quota_ui_render_settings(&view,&net,78,now,&prefs,&settings,false);
+        char name[40]; snprintf(name,sizeof(name),"settings-menu-%d",i);
+        capture(screen,argv[1],name);
+    }
+    settings.page=QUOTA_SETTINGS_WIFI; settings.wifi_selected=1;
+    quota_ui_render_settings(&view,&net,78,now,&prefs,&settings,false);
+    capture(screen,argv[1],"settings-wifi");
+    settings.ap_requested=true;
+    quota_ui_render_settings(&view,&net,78,now,&prefs,&settings,false);
+    capture(screen,argv[1],"settings-wifi-opening");
+    settings.ap_requested=false; net.setup_failed=true;
+    quota_ui_render_settings(&view,&net,78,now,&prefs,&settings,false);
+    capture(screen,argv[1],"settings-wifi-failed");
+    net.setup_failed=false; net.setup=true;
+    strcpy(net.ap_name,"Passport-Quota-1234"); strcpy(net.ap_password,"123456789ABC");
+    quota_ui_render_settings(&view,&net,78,now,&prefs,&settings,false);
+    capture(screen,argv[1],"settings-wifi-hotspot");
+    assert(label_with_text(screen,"Wi-Fi 设置"));
+    net.setup=false; settings.page=QUOTA_SETTINGS_EDIT; settings.draft=prefs;
+    for (int i=1;i<QUOTA_SETTING_COUNT;i++) {
+        settings.selected=(quota_setting_item_t)i;
+        quota_ui_render_settings(&view,&net,78,now,&prefs,&settings,false);
+        char name[40]; snprintf(name,sizeof(name),"settings-edit-%d",i);
+        capture(screen,argv[1],name);
+    }
+    settings.selected=QUOTA_SETTING_VOLUME; settings.draft.volume=0;
+    quota_ui_render_settings(&view,&net,10,now,&prefs,&settings,false);
+    capture(screen,argv[1],"settings-mute");
+    settings.save_failed=true;
+    quota_ui_render_settings(&view,&net,78,now,&prefs,&settings,false);
+    capture(screen,argv[1],"settings-save-failed");
+    assert(label_with_text(screen,"保存失败 · 确定重试"));
+    settings.save_failed=false;
+    quota_ui_render_settings(&view,&net,78,now,&prefs,&settings,true);
+    capture(screen,argv[1],"settings-audio-failed");
+    settings.selected=QUOTA_SETTING_DIM; settings.draft.dim_seconds=0;
+    quota_ui_render_settings(&view,&net,78,now,&prefs,&settings,false);
+    capture(screen,argv[1],"settings-always-on");
+    settings.draft.dim_seconds=300;
+    quota_ui_render_settings(&view,&net,78,now,&prefs,&settings,false);
+    capture(screen,argv[1],"settings-dim-max");
+    settings.selected=QUOTA_SETTING_ROTATION; settings.draft.automatic=true;
+    quota_ui_render_settings(&view,&net,78,now,&prefs,&settings,false);
+    capture(screen,argv[1],"settings-rotation-on");
+    settings.page=QUOTA_SETTINGS_ROOT; settings.saved=true;
+    quota_ui_render_settings(&view,&net,78,now,&prefs,&settings,false);
+    capture(screen,argv[1],"settings-saved");
+    settings.page=QUOTA_SETTINGS_CLOSED;
+    quota_ui_render_settings(&view,&net,78,now,&prefs,&settings,false);
+    capture(screen,argv[1],"settings-return");
+    assert(label_with_text(screen,"73%"));
+    assert(!label_with_text(screen,"上下选择 · 确定进入"));
+    /* Exercise the shared panel anchors across every settings/account mode. */
+    for (int i=0;i<100;i++) {
+        settings.page=(quota_settings_page_t)(i%4);
+        settings.selected=(quota_setting_item_t)(1+i%4);
+        quota_ui_render_settings(&view,&net,78,now,&prefs,&settings,false);
+        lv_obj_update_layout(screen); check(screen,false); lv_refr_now(NULL);
     }
     lv_mem_monitor_t memory; lv_mem_monitor(&memory);
     printf("LVGL quota screens: PASS (%u visible labels checked, pool used %u%%, max %zu bytes)\n",s_labels,memory.used_pct,memory.max_used);

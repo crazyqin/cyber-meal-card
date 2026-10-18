@@ -1,5 +1,5 @@
 idf_component_register(
-    SRCS "quota_app.c" "quota_ui.c" "quota_presentation.c" "quota_model.c" "quota_parse.c" "quota_config.c" "quota_cos.c" "quota_discovery.c" "quota_collection.c" "quota_setup_access.c" "quota_net.c"
+    SRCS "quota_app.c" "quota_ui.c" "quota_presentation.c" "quota_model.c" "quota_parse.c" "quota_config.c" "quota_cos.c" "quota_discovery.c" "quota_collection.c" "quota_setup_access.c" "quota_net.c" "quota_settings.c" "quota_device.c"
          "../assets/fonts/quota/quota_font_14.c" "../assets/fonts/quota/quota_font_16.c"
     INCLUDE_DIRS "."
     REQUIRES bsp esp_event esp_hw_support esp_netif esp_timer esp_wifi nvs_flash

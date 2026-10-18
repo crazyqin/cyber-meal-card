@@ -4,6 +4,7 @@ typedef struct {
     bool wifi;
     bool syncing;
     bool setup;
+    bool setup_failed;
     bool clock_ready;
     bool config_failed;
     bool connecting;
@@ -18,5 +19,4 @@ typedef struct {
 void quota_net_start(void);
 void quota_net_read(quota_selection_t *selection, quota_view_t *view, quota_connection_t *connection);
 void quota_net_refresh(void);
-void quota_net_setup(void);
-void quota_net_connect(void);
+void quota_net_set_setup(bool enabled);

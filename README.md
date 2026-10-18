@@ -117,10 +117,15 @@ matching layout and application-only update procedure.
 | Control | Action |
 | --- | --- |
 | Up / Down, short press | Previous / next account |
-| OK, short press | Request synchronization |
-| OK, long press | Open / close the Wi-Fi and COS setup hotspot |
+| OK, short press | Connect Wi-Fi if needed, then synchronize |
+| OK, long press | Open device settings; return or cancel within settings |
 | Up, long press | Toggle automatic page rotation |
-| Down, long press | Reconnect Wi-Fi |
+| Down, long press | Unassigned |
+
+Device settings include Wi-Fi, volume, backlight, idle dimming and automatic rotation.
+Use Up/Down to select or adjust, then OK to enter or save. Wi-Fi → Phone setup opens
+the hotspot for entering credentials at `192.168.4.1`. Volume and backlight preview
+immediately; long-press OK cancels an unsaved adjustment. Confirmed settings survive restart.
 
 ## Private configuration
 

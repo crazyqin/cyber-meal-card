@@ -34,8 +34,7 @@
 #define CONFIG_CAP 14336
 #define REFRESH_BIT 1
 #define SETUP_BIT 2
-#define CONNECT_BIT 4
-#define FIRMWARE_TAG "20261017-joined-titles"
+#define FIRMWARE_TAG "20261018-device-settings"
 typedef struct { uint32_t version, generation; quota_snapshot_t snapshot; } quota_cache_t;
 static quota_config_t s_config;
 static quota_snapshot_t s_snapshot;
@@ -50,6 +49,7 @@ static volatile bool s_setup_touched;
 static esp_netif_t *s_ap_netif;
 static int64_t s_sync_deadline;
 static int s_fetch_cursor;
+static bool s_setup_desired;
 static quota_status_t failure(int code);
 extern const unsigned char setup_html_start[] asm("_binary_setup_html_start");
 extern const unsigned char setup_html_end[] asm("_binary_setup_html_end");
@@ -85,8 +85,14 @@ void quota_net_read(quota_selection_t *selection, quota_view_t *view, quota_conn
     xSemaphoreGive(s_mutex);
 }
 void quota_net_refresh(void) { if (s_worker) xTaskNotify(s_worker, REFRESH_BIT, eSetBits); }
-void quota_net_setup(void) { if (s_worker) xTaskNotify(s_worker, SETUP_BIT, eSetBits); }
-void quota_net_connect(void) { if (s_worker) xTaskNotify(s_worker, CONNECT_BIT, eSetBits); }
+void quota_net_set_setup(bool enabled) {
+    if (!s_worker) return;
+    xSemaphoreTake(s_mutex, portMAX_DELAY);
+    s_setup_desired = enabled;
+    s_connection.setup_failed = false;
+    xSemaphoreGive(s_mutex);
+    xTaskNotify(s_worker, SETUP_BIT, eSetBits);
+}
 static void connection_state(bool setup, bool syncing) {
     xSemaphoreTake(s_mutex, portMAX_DELAY);
     s_connection.setup = setup;
@@ -111,14 +117,17 @@ static bool connect_station(const quota_config_t *cfg) {
     if (esp_wifi_set_mode(keep_ap ? WIFI_MODE_APSTA : WIFI_MODE_STA) != ESP_OK ||
         esp_wifi_set_config(WIFI_IF_STA, &wifi) != ESP_OK ||
         (!keep_ap && esp_wifi_start() != ESP_OK) || esp_wifi_connect() != ESP_OK) return false;
-    for (int i = 0; i < 200 && !s_wifi; i++) vTaskDelay(pdMS_TO_TICKS(100));
+    for (int i = 0; i < 200 && !s_wifi; i++) {
+        if (ulTaskNotifyValueClear(NULL, 0) & SETUP_BIT) break;
+        vTaskDelay(pdMS_TO_TICKS(100));
+    }
     return s_wifi;
 }
 typedef struct { char *buffer; size_t length; bool overflow; } response_t;
 static bool sync_interrupted(void) {
     return !s_wifi || s_config_pending ||
         (s_sync_deadline && esp_timer_get_time() / 1000 >= s_sync_deadline) ||
-        (ulTaskNotifyValueClear(NULL, 0) & (SETUP_BIT | CONNECT_BIT));
+        (ulTaskNotifyValueClear(NULL, 0) & SETUP_BIT);
 }
 static esp_err_t http_event(esp_http_client_event_t *event) {
     response_t *r = event->user_data;
@@ -335,6 +344,7 @@ static esp_err_t setup_status(httpd_req_t *req) {
     cJSON_AddNumberToObject(json, "wait", s_connection.sync_wait_seconds);
     cJSON_AddNumberToObject(json, "save", s_connection.save_state);
     cJSON_AddBoolToObject(json, "wifi_configured", s_config.ssid[0]);
+    cJSON_AddStringToObject(json, "wifi_ssid", s_config.ssid);
     cJSON_AddBoolToObject(json, "collector_only", true);
     cJSON_AddNumberToObject(json, "cos_missing", quota_cos_missing(&s_config));
     cJSON_AddBoolToObject(json, "builtin_cos", s_connection.builtin_cos);
@@ -353,7 +363,8 @@ static esp_err_t setup_action(httpd_req_t *req) {
     if (!connect && !sync) return httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Unknown action");
     if (s_config_pending) { httpd_resp_set_status(req, "409 Conflict"); return httpd_resp_sendstr(req, "Save in progress"); }
     s_setup_touched = true;
-    if (connect) quota_net_connect(); else quota_net_refresh();
+    /* Older setup pages can still send "connect"; both actions now sync. */
+    quota_net_refresh();
     httpd_resp_set_type(req, "application/json");
     return httpd_resp_sendstr(req, "{\"accepted\":true}");
 }
@@ -419,6 +430,7 @@ static void start_setup(void) {
     s_wifi = false;
     uint32_t random = esp_random();
     xSemaphoreTake(s_mutex, portMAX_DELAY);
+    s_connection.setup_failed = false;
     snprintf(s_connection.ap_name, sizeof(s_connection.ap_name), "Passport-Quota-%04X", (unsigned)(random & 65535));
     snprintf(s_connection.ap_password, sizeof(s_connection.ap_password), "%08lX%04lX", (unsigned long)esp_random(), (unsigned long)(esp_random() & 65535));
     wifi_config_t ap = {0};
@@ -428,9 +440,15 @@ static void start_setup(void) {
     ap.ap.max_connection = 1;
     ap.ap.authmode = WIFI_AUTH_WPA2_PSK;
     xSemaphoreGive(s_mutex);
-    ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_APSTA));
-    ESP_ERROR_CHECK(esp_wifi_set_config(WIFI_IF_AP, &ap));
-    ESP_ERROR_CHECK(esp_wifi_start());
+    esp_err_t result = esp_wifi_set_mode(WIFI_MODE_APSTA);
+    if (result == ESP_OK) result = esp_wifi_set_config(WIFI_IF_AP, &ap);
+    if (result == ESP_OK) result = esp_wifi_start();
+    if (result != ESP_OK) {
+        esp_wifi_set_mode(WIFI_MODE_STA);
+        xSemaphoreTake(s_mutex, portMAX_DELAY); s_connection.setup_failed = true; xSemaphoreGive(s_mutex);
+        connection_state(false, false);
+        return;
+    }
     httpd_config_t http = HTTPD_DEFAULT_CONFIG();
     http.stack_size = 6144;
     /* HTML, two local scripts and status polling can overlap on mobile browsers.
@@ -454,7 +472,11 @@ static void start_setup(void) {
         httpd_register_uri_handler(s_server, &backup);
         httpd_register_uri_handler(s_server, &qr);
     }
-    connection_state(true, false);
+    if (!s_server) {
+        esp_wifi_set_mode(WIFI_MODE_STA);
+        xSemaphoreTake(s_mutex, portMAX_DELAY); s_connection.setup_failed = true; xSemaphoreGive(s_mutex);
+    }
+    connection_state(s_server != NULL, false);
 }
 static void stop_setup(void) {
     if (s_server) { httpd_stop(s_server); s_server = NULL; }
@@ -522,7 +544,8 @@ static void worker(void *arg) {
         if (bits & REFRESH_BIT) manual_pending = true;
         if (s_setup_touched) { s_setup_touched = false; setup_at = now; }
         if (bits & SETUP_BIT) {
-            if (s_connection.setup) { stop_setup(); next_poll = 0; }
+            xSemaphoreTake(s_mutex, portMAX_DELAY); bool enable = s_setup_desired; xSemaphoreGive(s_mutex);
+            if (!enable) { stop_setup(); next_poll = 0; }
             else { start_setup(); setup_at = now; }
         }
         quota_config_t *candidate = NULL;
@@ -555,15 +578,11 @@ static void worker(void *arg) {
             s_config_pending = false;
             free(candidate);
         }
-        if (bits & CONNECT_BIT) {
-            xSemaphoreTake(s_mutex, portMAX_DELAY); s_connection.connecting = true; xSemaphoreGive(s_mutex);
-            if (!s_config.ssid[0] && !s_server) { start_setup(); setup_at = now; }
-            bool connected = connect_station(&s_config);
-            xSemaphoreTake(s_mutex, portMAX_DELAY);
-            s_connection.connecting = false;
-            s_connection.config_failed = !connected;
-            xSemaphoreGive(s_mutex);
-            now = esp_timer_get_time() / 1000;
+        if (manual_pending && !s_config.ssid[0]) {
+            if (!s_server) start_setup();
+            setup_at = now;
+            manual_pending = false;
+            continue; /* Saving Wi-Fi settings will request a fresh sync. */
         }
         if (s_connection.setup) {
             if (s_config.ssid[0] && now - setup_at > 300000) { stop_setup(); next_poll = 0; }
@@ -581,6 +600,7 @@ static void worker(void *arg) {
         xSemaphoreTake(s_mutex, portMAX_DELAY); s_connection.sync_wait_seconds = 0; xSemaphoreGive(s_mutex);
         last_poll = now;
         connection_state(s_server != NULL, true);
+        /* Reuse a live connection; an offline refresh connects before COS. */
         if (!s_wifi) {
             xSemaphoreTake(s_mutex, portMAX_DELAY); s_connection.connecting = true; xSemaphoreGive(s_mutex);
             connect_station(&s_config);

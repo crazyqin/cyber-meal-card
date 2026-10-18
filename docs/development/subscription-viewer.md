@@ -34,15 +34,20 @@ Labels are static; long aliases use ellipses instead of continuous scrolling.
 | TokenHub | Estimated remaining monthly allocation, monthly spending and today's spending; unlimited allocation is explicit |
 | TeleAgent | Points balance, today's points used and today's points added, across all clients/models |
 
-The Deep Ocean Blue theme uses a dark navy background (`#0B1421`), blue panels (`#15253A`),
-light text (`#EAF3FF`) and blue accents (`#78B7FF`), with warm orange warnings (`#FFBF80`).
+The Deep Ocean Blue theme uses a dark navy background (`#0B1421`), blue panels (`#142338`),
+light text (`#EFF5FF`) and blue accents (`#78B7FF`), with warm orange warnings (`#FFBF80`).
 Points identify their unit in the primary metric label; the TeleAgent header has no separate
 points badge. Points never use a currency symbol.
 Provider titles use distinct accents on the same navy background: ChatGPT mint (`#4FD1A5`),
 ClinePass gold (`#F5C16C`), DeepSeek blue (`#7E9BFF`), TeleAgent cyan (`#58C8E8`) and
 TokenHub violet (`#C29CFF`). Generic providers and setup titles use the standard light text.
-The metric block starts 12 px higher than the previous layout; all services retain the same
-card positions relative to that block.
+The primary number uses Montserrat 36, falling back through 28, 20 and the existing Chinese
+fonts for long values. Detail cards have a fine blue outline and rounded corners; quota
+tracks share their provider's title accent, while low quotas keep the warning color.
+All services retain the same card positions. The battery outline includes a proportional
+fill, with warm warnings at 20% or below and an empty outline plus `--` for unavailable
+readings. The page number sits in a quiet capsule. Setup and empty-state guidance use an
+inset panel with a 14 px Chinese font. The font subsets include the device-settings vocabulary.
 
 Amounts consistently use the yuan or dollar symbol and two decimal places. Positive amounts
 below one cent are marked as less than one cent; very large amounts use explicit scientific
@@ -54,7 +59,7 @@ days show their collection date in Beijing time (UTC+8). Sync activity appears i
 without hiding source errors in the footer. ChatGPT shows a countdown to the earliest known
 reset-credit expiry, warning within 24 hours. Elapsed expiry says it awaits collector
 confirmation; the device does not decrement the collected credit count.
-Setup and empty states use the same header/footer. Button actions are unchanged. Manual
+Setup and empty states use the same header/footer. Account-page short presses are unchanged. Manual
 account navigation or waking the dimmed screen pauses automatic rotation for 30 seconds;
 otherwise rotation runs every 10 seconds. Rotation stops on the settings screen.
 
@@ -243,16 +248,17 @@ Fixed-width C escapes preserve Chinese SSIDs and special characters exactly. Set
 regeneration. Without Wi-Fi fields, builds retain the existing COS-only behavior.
 
 At startup, a device with no saved Wi-Fi configuration uses the embedded SSID/password and
-connects automatically. Saved Wi-Fi takes priority; long-press OK to change it through the setup
-page. Defaults stay in the private app image and need no separate filesystem or data partition.
+connects automatically. Saved Wi-Fi takes priority; long-press OK and choose Wi-Fi → Phone setup
+to change it. Defaults stay in the private app image and need no separate filesystem or data partition.
 A manual equivalent is:
 
 ```powershell
 python tools/prepare_private_cos.py --config collector/config.local.json --key-file ../key.txt
 ```
 
-Without embedded Wi-Fi, fresh firmware needs 2.4 GHz Wi-Fi credentials. Long-press OK to open/close the randomized
-WPA2 device hotspot and visit `http://192.168.4.1`. The configuration page is restricted to the
+Without embedded Wi-Fi, fresh firmware needs 2.4 GHz Wi-Fi credentials. Long-press OK, select
+Wi-Fi → Phone setup, connect to the randomized WPA2 device hotspot and visit `http://192.168.4.1`.
+Long-press OK on the hotspot guide to close it and return to the Wi-Fi menu. The configuration page is restricted to the
 hotspot interface. Wi-Fi changes are tested before persistence; failed changes retain the old
 configuration. The page can override COS and export/import local JSON or multipart offline QR
 backups. Blank optional form values preserve saved data; explicit clear options remove them.
@@ -260,11 +266,36 @@ backups. Blank optional form values preserve saved data; explicit clear options 
 | Control | Action |
 | --- | --- |
 | Up/down click | Previous/next account |
-| OK click | Queue synchronization, minimum ten seconds between manual requests |
-| OK long press | Open/close setup |
+| OK click | Connect Wi-Fi if offline, then synchronize; requests within ten seconds stay queued |
+| OK long press | Open device settings; return or cancel inside settings |
 | Up long press | Toggle ten-second automatic page rotation |
-| Down long press | Reconnect Wi-Fi |
+| Down long press | Unassigned |
 | First key after dimming | Wake backlight |
+
+The settings menu uses Up/Down to select and OK to enter. Wi-Fi offers connect-and-sync
+and phone provisioning; its web page shows the saved network name and a password reveal
+button without returning a saved password to the browser. Other entries use Up to increase,
+Down to decrease, OK to save, and long-press OK to cancel. Save failures retain the editor for retry.
+
+| Setting | Range and behavior | Default |
+| --- | --- | --- |
+| Volume | 0–100%, 5% steps; zero mutes, changes play an 80 ms test tone | 40% |
+| Backlight | 10–100%, 5% steps; immediate preview, cancel restores saved brightness | 75% |
+| Idle dimming | Always on, 15/30/45/60/120/300 seconds; dims to 5%, first key only wakes | 45 seconds |
+| Automatic rotation | On/off, ten-second interval; disabled while settings are open | Off |
+
+Preferences are validated and stored in a separate `quota_device/preferences` NVS record,
+preserving the existing Wi-Fi/COS schema. Missing or invalid records use the defaults above.
+The existing JSON/QR backup covers network/COS configuration, not device preferences.
+Audio runs in a lazy worker with a bounded buffer; it drains playback before suspending the
+codec and acknowledges cancellation before settings are written to Flash. No key or LVGL
+callback plays audio or writes NVS. `main/quota_settings.c` keeps navigation, adjustment,
+validation and dimming rules independent of ESP-IDF/LVGL for host tests.
+
+OK and the setup page's single “connect and sync” button share one operation.
+An existing Wi-Fi connection is reused; an offline device connects before reading COS.
+Without a saved Wi-Fi network, OK opens setup. A failed connection preserves cached data
+and reports the network failure. Saving Wi-Fi settings requests synchronization automatically.
 
 Automatic sync runs every five minutes; data older than fifteen minutes, future timestamps and
 errors are marked stale. Reset countdowns never replenish quota locally. HTTPS verifies TLS,
